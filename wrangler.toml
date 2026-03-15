@@ -5,7 +5,7 @@ pages_build_output_dir = "./dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "habitflow-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "bdab1915-ced9-4c8c-9d75-5c0a69310ac2"
 migrations_dir = "drizzle/migrations"
 
 [vars]
@@ -20,7 +20,7 @@ crons = ["0 2 * * *"]
 [[env.preview.d1_databases]]
 binding = "DB"
 database_name = "habitflow-db-preview"
-database_id = "REPLACE_WITH_YOUR_PREVIEW_D1_DATABASE_ID"
+database_id = "9037d6ee-8371-4427-988b-fc04da83618a"
 
 [env.preview.vars]
 ENVIRONMENT = "preview"

@@ -22,6 +22,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Create test environment vars
+        run: |
+          echo "JWT_SECRET=vitest-test-secret-minimum-32-chars-ok" >> .dev.vars
+          echo "ENVIRONMENT=preview" >> .dev.vars
+          echo "ALLOWED_ORIGIN=http://localhost:5173" >> .dev.vars
+
       - name: Run tests
         run: npm test
 

@@ -10,7 +10,6 @@ migrations_dir = "drizzle/migrations"
 
 [vars]
 ENVIRONMENT = "production"
-ALLOWED_ORIGIN = "https://habitflow.pages.dev"
 
 [env.preview]
 [[env.preview.d1_databases]]
@@ -21,4 +20,3 @@ migrations_dir = "drizzle/migrations"
 
 [env.preview.vars]
 ENVIRONMENT = "preview"
-ALLOWED_ORIGIN = "https://habitflow.pages.dev"

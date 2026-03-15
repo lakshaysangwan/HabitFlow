@@ -1,7 +1,6 @@
 name = "habitflow"
 compatibility_date = "2024-09-23"
 pages_build_output_dir = "./dist"
-migrations_dir = "drizzle/migrations"
 
 [[d1_databases]]
 binding = "DB"
@@ -22,6 +21,7 @@ crons = ["0 2 * * *"]
 binding = "DB"
 database_name = "habitflow-db-preview"
 database_id = "9037d6ee-8371-4427-988b-fc04da83618a"
+migrations_dir = "drizzle/migrations"
 
 [env.preview.vars]
 ENVIRONMENT = "preview"

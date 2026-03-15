@@ -1,0 +1,5 @@
+# Copy this to .dev.vars (which is gitignored) for local development
+# Generate a secret: openssl rand -base64 32
+JWT_SECRET=replace-with-32-char-minimum-random-secret
+ENVIRONMENT=preview
+ALLOWED_ORIGIN=http://localhost:5173

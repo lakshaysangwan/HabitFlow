@@ -1,0 +1,27 @@
+name = "habitflow"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "./dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "habitflow-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "drizzle/migrations"
+
+[vars]
+ENVIRONMENT = "production"
+ALLOWED_ORIGIN = "https://habitflow.pages.dev"
+
+# Cron trigger: purge audit logs older than 90 days, daily at 02:00 UTC
+[triggers]
+crons = ["0 2 * * *"]
+
+[env.preview]
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "habitflow-db-preview"
+database_id = "REPLACE_WITH_YOUR_PREVIEW_D1_DATABASE_ID"
+
+[env.preview.vars]
+ENVIRONMENT = "preview"
+ALLOWED_ORIGIN = "https://habitflow.pages.dev"

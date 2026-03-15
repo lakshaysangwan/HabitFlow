@@ -12,10 +12,6 @@ migrations_dir = "drizzle/migrations"
 ENVIRONMENT = "production"
 ALLOWED_ORIGIN = "https://habitflow.pages.dev"
 
-# Cron trigger: purge audit logs older than 90 days, daily at 02:00 UTC
-[triggers]
-crons = ["0 2 * * *"]
-
 [env.preview]
 [[env.preview.d1_databases]]
 binding = "DB"

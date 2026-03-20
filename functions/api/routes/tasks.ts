@@ -64,6 +64,10 @@ function stripHTML(s: string): string {
     .trim()
 }
 
+function parseFreqDays(t: { frequency_days: string | null }) {
+  return t.frequency_days ? JSON.parse(t.frequency_days) : null
+}
+
 // ─── GET /tasks ───────────────────────────────────────────────────────────────
 
 app.get('/', async (c) => {
@@ -93,12 +97,7 @@ app.get('/', async (c) => {
       .all()
   }
 
-  const parsed = tasks.map(t => ({
-    ...t,
-    frequency_days: t.frequency_days ? JSON.parse(t.frequency_days) : null,
-  }))
-
-  return ok({ tasks: parsed })
+  return ok({ tasks: tasks.map(t => ({ ...t, frequency_days: parseFreqDays(t) })) })
 })
 
 // ─── POST /tasks ──────────────────────────────────────────────────────────────
@@ -114,29 +113,16 @@ app.post('/', async (c) => {
   const { name, frequency_type, frequency_days, data_type, data_label } = parsed.data
   const db = getDB(c.env.DB)
 
-  // Get existing colors for this user
-  const existing = await db
-    .select({ color: schema.tasks.color })
-    .from(schema.tasks)
-    .where(and(eq(schema.tasks.user_id, userId), eq(schema.tasks.status, 'active')))
-    .all()
-
-  const paused = await db
-    .select({ color: schema.tasks.color })
-    .from(schema.tasks)
-    .where(and(eq(schema.tasks.user_id, userId), eq(schema.tasks.status, 'paused')))
-    .all()
-
-  const usedColors = [...existing, ...paused].map(t => t.color)
-  const color = pickTaskColor(usedColors)
-
-  // Get max sort_order
-  const allTasks = await db
-    .select({ sort_order: schema.tasks.sort_order })
+  // Single query: get all user tasks for color + sort_order calculation
+  const allUserTasks = await db
+    .select({ color: schema.tasks.color, sort_order: schema.tasks.sort_order, status: schema.tasks.status })
     .from(schema.tasks)
     .where(eq(schema.tasks.user_id, userId))
     .all()
-  const maxOrder = allTasks.length > 0 ? Math.max(...allTasks.map(t => t.sort_order)) : -1
+
+  const usedColors = allUserTasks.filter(t => t.status !== 'archived').map(t => t.color)
+  const color = pickTaskColor(usedColors)
+  const maxOrder = allUserTasks.length > 0 ? Math.max(...allUserTasks.map(t => t.sort_order)) : -1
 
   const taskId = crypto.randomUUID().replace(/-/g, '')
   await db.insert(schema.tasks).values({
@@ -156,12 +142,10 @@ app.post('/', async (c) => {
   const task = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get()
   if (!task) return err('SERVER_ERROR', 'Failed to create task', 500)
 
-  return ok({
-    task: { ...task, frequency_days: task.frequency_days ? JSON.parse(task.frequency_days) : null },
-  }, 201)
+  return ok({ task: { ...task, frequency_days: parseFreqDays(task) } }, 201)
 })
 
-// ─── PATCH /tasks/reorder (must come before :id) ───────────────────────────────
+// ─── PUT /tasks/reorder (must come before :id) ────────────────────────────────
 
 app.put('/reorder', async (c) => {
   const userId = await getAuthedUserId(c, c.env)
@@ -184,13 +168,14 @@ app.put('/reorder', async (c) => {
     return err('FORBIDDEN', 'One or more tasks not found', 404)
   }
 
-  // Update sort_order for each task
-  for (let i = 0; i < parsed.data.task_ids.length; i++) {
-    await db
-      .update(schema.tasks)
-      .set({ sort_order: i })
-      .where(and(eq(schema.tasks.id, parsed.data.task_ids[i]), eq(schema.tasks.user_id, userId)))
-  }
+  // Update sort_order for all tasks in parallel
+  await Promise.all(
+    parsed.data.task_ids.map((id, i) =>
+      db.update(schema.tasks)
+        .set({ sort_order: i })
+        .where(and(eq(schema.tasks.id, id), eq(schema.tasks.user_id, userId)))
+    )
+  )
 
   return ok(null)
 })
@@ -217,9 +202,8 @@ app.patch('/:id', async (c) => {
 
   if (!existing) return err('NOT_FOUND', 'Task not found', 404)
 
-  const updates: Partial<typeof schema.tasks.$inferInsert> = {
-    updated_at: new Date().toISOString(),
-  }
+  const updatedAt = new Date().toISOString()
+  const updates: Partial<typeof schema.tasks.$inferInsert> = { updated_at: updatedAt }
   if (parsed.data.name !== undefined) updates.name = stripHTML(parsed.data.name)
   if (parsed.data.frequency_type !== undefined) updates.frequency_type = parsed.data.frequency_type
   if (parsed.data.frequency_days !== undefined) {
@@ -237,8 +221,10 @@ app.patch('/:id', async (c) => {
     .set(updates)
     .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.user_id, userId)))
 
-  const task = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get()
-  return ok({ task: { ...task!, frequency_days: task!.frequency_days ? JSON.parse(task!.frequency_days) : null } })
+  // Build response from existing + applied updates (no re-fetch)
+  const task = { ...existing, ...updates }
+  const freqDays = task.frequency_days ? JSON.parse(task.frequency_days) : null
+  return ok({ task: { ...task, frequency_days: freqDays } })
 })
 
 // ─── DELETE /tasks/:id ─────────────────────────────────────────────────────────
@@ -283,13 +269,14 @@ app.patch('/:id/pause', async (c) => {
 
   if (!existing) return err('NOT_FOUND', 'Task not found', 404)
 
+  const pausedAt = new Date().toISOString()
   await db
     .update(schema.tasks)
-    .set({ status: 'paused', paused_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .set({ status: 'paused', paused_at: pausedAt, updated_at: pausedAt })
     .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.user_id, userId)))
 
-  const task = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get()
-  return ok({ task: { ...task!, frequency_days: task!.frequency_days ? JSON.parse(task!.frequency_days) : null } })
+  const task = { ...existing, status: 'paused' as const, paused_at: pausedAt, updated_at: pausedAt }
+  return ok({ task: { ...task, frequency_days: parseFreqDays(task) } })
 })
 
 // ─── PATCH /tasks/:id/resume ───────────────────────────────────────────────────
@@ -309,11 +296,12 @@ app.patch('/:id/resume', async (c) => {
 
   if (!existing) return err('NOT_FOUND', 'Task not found', 404)
 
+  const updatedAt = new Date().toISOString()
   await db
     .update(schema.tasks)
-    .set({ status: 'active', paused_at: null, updated_at: new Date().toISOString() })
+    .set({ status: 'active', paused_at: null, updated_at: updatedAt })
     .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.user_id, userId)))
 
-  const task = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get()
-  return ok({ task: { ...task!, frequency_days: task!.frequency_days ? JSON.parse(task!.frequency_days) : null } })
+  const task = { ...existing, status: 'active' as const, paused_at: null, updated_at: updatedAt }
+  return ok({ task: { ...task, frequency_days: parseFreqDays(task) } })
 })

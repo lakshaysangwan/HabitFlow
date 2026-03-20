@@ -1,52 +1,46 @@
-import type { DB } from './db'
-import { schema } from './db'
-import { eq } from 'drizzle-orm'
-
 interface RateLimitConfig {
   limit: number
   windowSeconds: number
 }
 
 /**
- * Check and increment rate limit counter using D1.
+ * Check and increment rate limit counter using a single atomic D1 UPSERT.
  * Returns true if the request is ALLOWED, false if rate limited.
+ *
+ * Uses raw D1 instead of Drizzle because Drizzle's onConflictDoUpdate
+ * doesn't support CASE expressions in the SET clause.
  */
 export async function checkRateLimit(
-  db: DB,
+  db: D1Database,
   key: string,
   config: RateLimitConfig
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000)
   const windowStart = now - config.windowSeconds
 
-  // Try to get existing record
-  const existing = await db
-    .select()
-    .from(schema.rate_limits)
-    .where(eq(schema.rate_limits.key, key))
-    .get()
+  // Single atomic UPSERT:
+  // - If no row exists: insert with count=1
+  // - If window has expired: reset count to 1
+  // - If count is already at the limit: set to limit+1 (marks as blocked, never increments past that)
+  // - Otherwise: increment by 1
+  // RETURNING count lets us check in one round-trip.
+  const row = await db
+    .prepare(
+      `INSERT INTO rate_limits (key, count, window_start) VALUES (?, 1, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         count = CASE
+           WHEN window_start < ?  THEN 1
+           WHEN count >= ?        THEN ? + 1
+           ELSE count + 1
+         END,
+         window_start = CASE
+           WHEN window_start < ?  THEN ?
+           ELSE window_start
+         END
+       RETURNING count`
+    )
+    .bind(key, now, windowStart, config.limit, config.limit, windowStart, now)
+    .first<{ count: number }>()
 
-  if (!existing || existing.window_start < windowStart) {
-    // No record or window expired — insert/replace with count=1
-    await db
-      .insert(schema.rate_limits)
-      .values({ key, count: 1, window_start: now })
-      .onConflictDoUpdate({
-        target: schema.rate_limits.key,
-        set: { count: 1, window_start: now },
-      })
-    return true
-  }
-
-  if (existing.count >= config.limit) {
-    return false // Rate limited
-  }
-
-  // Increment counter
-  await db
-    .update(schema.rate_limits)
-    .set({ count: existing.count + 1 })
-    .where(eq(schema.rate_limits.key, key))
-
-  return true
+  return (row?.count ?? 1) <= config.limit
 }

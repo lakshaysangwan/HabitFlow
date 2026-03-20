@@ -7,7 +7,7 @@
 
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, inArray } from 'drizzle-orm'
 import { getDB, schema } from '../../lib/db'
 import { ok, err } from '../../lib/response'
 import { verifyJWT } from '../../lib/jwt'
@@ -53,17 +53,12 @@ app.get('/', async (c) => {
     .where(and(eq(schema.completions.user_id, userId), eq(schema.completions.completed_date, date)))
     .all()
 
-  // Fetch associated tasks
+  // Fetch only the tasks referenced by these completions
   const taskIds = [...new Set(completions.map(c => c.task_id))]
   const tasks = taskIds.length > 0
     ? await db.select().from(schema.tasks)
-        .where(and(
-          eq(schema.tasks.user_id, userId),
-          // SQLite doesn't support inArray with empty arrays well
-          ...taskIds.length > 0 ? [] : []
-        ))
+        .where(and(eq(schema.tasks.user_id, userId), inArray(schema.tasks.id, taskIds)))
         .all()
-        .then(rows => rows.filter(r => taskIds.includes(r.id)))
     : []
 
   const taskMap = new Map(tasks.map(t => [t.id, { ...t, frequency_days: t.frequency_days ? JSON.parse(t.frequency_days) : null }]))

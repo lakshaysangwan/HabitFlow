@@ -35,17 +35,12 @@ app.get('/daily', async (c) => {
 
   const db = getDB(c.env.DB)
 
-  const tasks = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.user_id, userId))
-    .all()
-
-  const completions = await db
-    .select()
-    .from(schema.completions)
-    .where(and(eq(schema.completions.user_id, userId), eq(schema.completions.completed_date, date)))
-    .all()
+  const [tasks, completions] = await Promise.all([
+    db.select().from(schema.tasks).where(eq(schema.tasks.user_id, userId)).all(),
+    db.select().from(schema.completions)
+      .where(and(eq(schema.completions.user_id, userId), eq(schema.completions.completed_date, date)))
+      .all(),
+  ])
 
   const completionMap = new Map(completions.map(c => [c.task_id, c]))
 
@@ -153,21 +148,16 @@ app.get('/overview', async (c) => {
   const db = getDB(c.env.DB)
   const { start, end } = getDateRange(range)
 
-  const tasks = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.user_id, userId))
-    .all()
-
-  const completions = await db
-    .select()
-    .from(schema.completions)
-    .where(and(
-      eq(schema.completions.user_id, userId),
-      gte(schema.completions.completed_date, start),
-      lte(schema.completions.completed_date, end)
-    ))
-    .all()
+  const [tasks, completions] = await Promise.all([
+    db.select().from(schema.tasks).where(eq(schema.tasks.user_id, userId)).all(),
+    db.select().from(schema.completions)
+      .where(and(
+        eq(schema.completions.user_id, userId),
+        gte(schema.completions.completed_date, start),
+        lte(schema.completions.completed_date, end)
+      ))
+      .all(),
+  ])
 
   const completionSet = new Set(completions.map(c => `${c.task_id}:${c.completed_date}`))
   const dates = dateRange(start, end)
@@ -237,21 +227,16 @@ app.get('/heatmap', async (c) => {
   const end = `${year}-12-31`
   const db = getDB(c.env.DB)
 
-  const tasks = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.user_id, userId))
-    .all()
-
-  const completions = await db
-    .select()
-    .from(schema.completions)
-    .where(and(
-      eq(schema.completions.user_id, userId),
-      gte(schema.completions.completed_date, start),
-      lte(schema.completions.completed_date, end)
-    ))
-    .all()
+  const [tasks, completions] = await Promise.all([
+    db.select().from(schema.tasks).where(eq(schema.tasks.user_id, userId)).all(),
+    db.select().from(schema.completions)
+      .where(and(
+        eq(schema.completions.user_id, userId),
+        gte(schema.completions.completed_date, start),
+        lte(schema.completions.completed_date, end)
+      ))
+      .all(),
+  ])
 
   const completionCountByDate = new Map<string, number>()
   for (const c of completions) {

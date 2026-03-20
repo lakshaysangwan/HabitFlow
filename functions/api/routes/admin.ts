@@ -60,7 +60,7 @@ app.get('/users', async (c) => {
   const db = getDB(c.env.DB)
 
   // Rate limit: 20/min
-  const allowed = await checkRateLimit(db, `admin:${god.sub}`, { limit: 20, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
   const search = c.req.query('search') ?? ''
@@ -105,38 +105,27 @@ app.get('/users/:id', async (c) => {
   const targetId = c.req.param('id')
   const db = getDB(c.env.DB)
 
-  const allowed = await checkRateLimit(db, `admin:${god.sub}`, { limit: 20, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
-  const user = await db
-    .select()
-    .from(schema.users)
-    .where(eq(schema.users.id, targetId))
-    .get()
-
-  if (!user) return err('NOT_FOUND', 'User not found', 404)
-
-  const tasks = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.user_id, targetId))
-    .all()
-
-  // Recent completions (30 days)
   const thirtyDaysAgo = new Date()
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
   const startDate = thirtyDaysAgo.toLocaleDateString('en-CA')
 
-  const recentCompletions = await db
-    .select()
-    .from(schema.completions)
-    .where(and(
-      eq(schema.completions.user_id, targetId),
-      sql`${schema.completions.completed_date} >= ${startDate}`
-    ))
-    .orderBy(sql`${schema.completions.completed_date} DESC`)
-    .limit(100)
-    .all()
+  const [user, tasks, recentCompletions] = await Promise.all([
+    db.select().from(schema.users).where(eq(schema.users.id, targetId)).get(),
+    db.select().from(schema.tasks).where(eq(schema.tasks.user_id, targetId)).all(),
+    db.select().from(schema.completions)
+      .where(and(
+        eq(schema.completions.user_id, targetId),
+        sql`${schema.completions.completed_date} >= ${startDate}`
+      ))
+      .orderBy(sql`${schema.completions.completed_date} DESC`)
+      .limit(100)
+      .all(),
+  ])
+
+  if (!user) return err('NOT_FOUND', 'User not found', 404)
 
   await logEvent(db, 'god_access', {
     user_id: god.sub,
@@ -163,7 +152,7 @@ app.get('/users/:id/analytics', async (c) => {
 
   const db = getDB(c.env.DB)
 
-  const allowed = await checkRateLimit(db, `admin:${god.sub}`, { limit: 20, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
   const targetUser = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, targetId)).get()
@@ -177,21 +166,16 @@ app.get('/users/:id/analytics', async (c) => {
 
   const { start, end } = getDateRange(range)
 
-  const tasks = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.user_id, targetId))
-    .all()
-
-  const completions = await db
-    .select()
-    .from(schema.completions)
-    .where(and(
-      eq(schema.completions.user_id, targetId),
-      gte(schema.completions.completed_date, start),
-      lte(schema.completions.completed_date, end)
-    ))
-    .all()
+  const [tasks, completions] = await Promise.all([
+    db.select().from(schema.tasks).where(eq(schema.tasks.user_id, targetId)).all(),
+    db.select().from(schema.completions)
+      .where(and(
+        eq(schema.completions.user_id, targetId),
+        gte(schema.completions.completed_date, start),
+        lte(schema.completions.completed_date, end)
+      ))
+      .all(),
+  ])
 
   const completionSet = new Set(completions.map(c => `${c.task_id}:${c.completed_date}`))
   const dates = dateRange(start, end)
@@ -258,7 +242,7 @@ app.post('/invite-codes', async (c) => {
 
   const db = getDB(c.env.DB)
 
-  const allowed = await checkRateLimit(db, `admin:${god.sub}`, { limit: 20, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
   // Check for duplicate code
@@ -296,7 +280,7 @@ app.get('/invite-codes', async (c) => {
 
   const db = getDB(c.env.DB)
 
-  const allowed = await checkRateLimit(db, `admin:${god.sub}`, { limit: 20, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
   const invite_codes = await db

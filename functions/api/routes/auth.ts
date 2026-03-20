@@ -72,7 +72,7 @@ app.post('/login', async (c) => {
   const ip = getIP(c.req.raw)
   const ua = getUserAgent(c.req.raw)
 
-  const allowed = await checkRateLimit(db, `auth:${ip}`, { limit: 5, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `auth:${ip}`, { limit: 5, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests. Please wait a moment.', 429)
 
   const existingUser = await db
@@ -216,7 +216,7 @@ app.patch('/password', async (c) => {
   const db = getDB(c.env.DB)
   const ip = getIP(c.req.raw)
 
-  const allowed = await checkRateLimit(db, `password:${userId}`, { limit: 5, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `password:${userId}`, { limit: 5, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests.', 429)
 
   if (new_password !== confirm_password) return err('VALIDATION_ERROR', 'Passwords do not match')

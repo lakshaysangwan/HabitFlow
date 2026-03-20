@@ -7,7 +7,7 @@ import { Hono } from 'hono'
 import { eq } from 'drizzle-orm'
 import type { Env } from '../lib/env'
 import { SECURITY_HEADERS } from '../lib/response'
-import { verifyJWT } from '../lib/jwt'
+import { verifyJWT, signJWT, shouldRefresh, makeTokenCookie } from '../lib/jwt'
 import { getDB, schema } from '../lib/db'
 import { checkTokenCache, setTokenCache } from '../lib/token-cache'
 
@@ -100,7 +100,13 @@ export function createApp() {
 
     c.set('userId', payload.sub)
     c.set('is_god', payload.is_god)
-    return next()
+    await next()
+
+    // Sliding-window token refresh: issue a new token if expiry is within 2h
+    if (shouldRefresh(payload)) {
+      const newToken = await signJWT(payload, c.env)
+      c.res.headers.append('Set-Cookie', makeTokenCookie(newToken, c.env))
+    }
   })
 
   app.route('/auth', authRoutes)

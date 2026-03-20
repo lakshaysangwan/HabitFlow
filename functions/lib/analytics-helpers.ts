@@ -54,6 +54,29 @@ export function isTaskScheduled(task: typeof schema.tasks.$inferSelect, date: st
   return true
 }
 
+/** Pre-parse frequency_days once per task — pass result to isTaskScheduledFast */
+export function parseTaskDays(task: typeof schema.tasks.$inferSelect): number[] | null {
+  if (task.frequency_type !== 'weekly' || !task.frequency_days) return null
+  return JSON.parse(task.frequency_days) as number[]
+}
+
+/** Like isTaskScheduled but accepts pre-parsed days to avoid JSON.parse in loops */
+export function isTaskScheduledFast(
+  task: typeof schema.tasks.$inferSelect,
+  parsedDays: number[] | null,
+  date: string
+): boolean {
+  if (task.status === 'archived') return false
+  if (date < task.start_date) return false
+  if (task.paused_at && date >= task.paused_at.slice(0, 10)) return false
+  if (task.frequency_type === 'weekly' && parsedDays) {
+    const d = new Date(date + 'T12:00:00')
+    const dow = d.getDay() === 0 ? 7 : d.getDay()
+    return parsedDays.includes(dow)
+  }
+  return true
+}
+
 /** Calculate current and best streaks from an ordered list of (date, completed) pairs */
 export function calcStreaks(entries: Array<{ date: string; completed: boolean }>): {
   current_streak: number

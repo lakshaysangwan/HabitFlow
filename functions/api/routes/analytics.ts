@@ -10,25 +10,17 @@ import { Hono } from 'hono'
 import { eq, and, gte, lte } from 'drizzle-orm'
 import { getDB, schema } from '../../lib/db'
 import { ok, err } from '../../lib/response'
-import { verifyJWT } from '../../lib/jwt'
-import { getDateRange, dateRange, isTaskScheduled, calcStreaks, type Range } from '../../lib/analytics-helpers'
+import { getDateRange, dateRange, isTaskScheduled, isTaskScheduledFast, parseTaskDays, calcStreaks, type Range } from '../../lib/analytics-helpers'
 import type { Env } from '../../lib/env'
 
-export const app = new Hono<{ Bindings: Env }>()
+type Variables = { userId: string; is_god: number }
 
-async function getUserId(c: { req: { header: (k: string) => string | undefined } }, env: Env): Promise<string | null> {
-  const cookie = c.req.header('Cookie') ?? ''
-  const m = cookie.match(/(?:^|;\s*)token=([^;]+)/)
-  if (!m) return null
-  const payload = await verifyJWT(m[1], env)
-  return payload?.sub ?? null
-}
+export const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 // ─── GET /daily ────────────────────────────────────────────────────────────────
 
 app.get('/daily', async (c) => {
-  const userId = await getUserId(c, c.env)
-  if (!userId) return err('UNAUTHORIZED', 'Not authenticated', 401)
+  const userId = c.get('userId')
 
   const date = c.req.query('date') ?? new Date().toLocaleDateString('en-CA')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return err('VALIDATION_ERROR', 'Invalid date')
@@ -71,8 +63,7 @@ app.get('/daily', async (c) => {
 // ─── GET /task/:id ─────────────────────────────────────────────────────────────
 
 app.get('/task/:id', async (c) => {
-  const userId = await getUserId(c, c.env)
-  if (!userId) return err('UNAUTHORIZED', 'Not authenticated', 401)
+  const userId = c.get('userId')
 
   const taskId = c.req.param('id')
   const range = (c.req.query('range') ?? 'month') as Range
@@ -105,10 +96,11 @@ app.get('/task/:id', async (c) => {
 
   const completionMap = new Map(completions.map(c => [c.completed_date, c]))
   const dates = dateRange(adjustedStart, end)
+  const parsedDays = parseTaskDays(task)
 
   const data_points = dates.map(date => {
     const comp = completionMap.get(date)
-    const scheduled = isTaskScheduled({ ...task, paused_at: task.paused_at ?? null }, date)
+    const scheduled = isTaskScheduledFast({ ...task, paused_at: task.paused_at ?? null }, parsedDays, date)
     return {
       date,
       scheduled,
@@ -139,8 +131,7 @@ app.get('/task/:id', async (c) => {
 // ─── GET /overview ─────────────────────────────────────────────────────────────
 
 app.get('/overview', async (c) => {
-  const userId = await getUserId(c, c.env)
-  if (!userId) return err('UNAUTHORIZED', 'Not authenticated', 401)
+  const userId = c.get('userId')
 
   const range = (c.req.query('range') ?? 'month') as Range
   if (!['week', 'month', 'year', 'all'].includes(range)) return err('VALIDATION_ERROR', 'Invalid range')
@@ -161,10 +152,11 @@ app.get('/overview', async (c) => {
 
   const completionSet = new Set(completions.map(c => `${c.task_id}:${c.completed_date}`))
   const dates = dateRange(start, end)
+  const parsedDaysMap = new Map(tasks.map(t => [t.id, parseTaskDays(t)]))
 
   // Daily rates
   const daily_rates = dates.map(date => {
-    const scheduled = tasks.filter(t => isTaskScheduled(t, date))
+    const scheduled = tasks.filter(t => isTaskScheduledFast(t, parsedDaysMap.get(t.id) ?? null, date))
     const done = scheduled.filter(t => completionSet.has(`${t.id}:${date}`))
     return {
       date,
@@ -185,7 +177,8 @@ app.get('/overview', async (c) => {
   const task_breakdown = tasks
     .filter(t => t.status !== 'archived')
     .map(t => {
-      const scheduled = dates.filter(d => isTaskScheduled(t, d))
+      const pd = parsedDaysMap.get(t.id) ?? null
+      const scheduled = dates.filter(d => isTaskScheduledFast(t, pd, d))
       const done = scheduled.filter(d => completionSet.has(`${t.id}:${d}`))
       return {
         task_id: t.id,
@@ -216,8 +209,7 @@ app.get('/overview', async (c) => {
 // ─── GET /heatmap ──────────────────────────────────────────────────────────────
 
 app.get('/heatmap', async (c) => {
-  const userId = await getUserId(c, c.env)
-  if (!userId) return err('UNAUTHORIZED', 'Not authenticated', 401)
+  const userId = c.get('userId')
 
   const yearParam = c.req.query('year')
   const year = yearParam ? parseInt(yearParam, 10) : new Date().getFullYear()
@@ -243,13 +235,14 @@ app.get('/heatmap', async (c) => {
     completionCountByDate.set(c.completed_date, (completionCountByDate.get(c.completed_date) ?? 0) + 1)
   }
 
+  const parsedDaysMap = new Map(tasks.map(t => [t.id, parseTaskDays(t)]))
   const dates = dateRange(start, end)
   const today = new Date().toLocaleDateString('en-CA')
 
   const days = dates
     .filter(d => d <= today)
     .map(date => {
-      const total = tasks.filter(t => isTaskScheduled(t, date)).length
+      const total = tasks.filter(t => isTaskScheduledFast(t, parsedDaysMap.get(t.id) ?? null, date)).length
       const count = completionCountByDate.get(date) ?? 0
       return { date, count, total }
     })

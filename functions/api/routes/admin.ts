@@ -3,6 +3,7 @@
  * GET  /api/admin/users?search=&page=&limit=
  * GET  /api/admin/users/:id
  * GET  /api/admin/users/:id/analytics?range=
+ * PATCH /api/admin/users/:id/password
  * POST /api/admin/invite-codes
  * GET  /api/admin/invite-codes
  */
@@ -12,32 +13,16 @@ import { z } from 'zod'
 import { eq, and, gte, lte, sql } from 'drizzle-orm'
 import { getDB, schema } from '../../lib/db'
 import { ok, err } from '../../lib/response'
-import { verifyJWT } from '../../lib/jwt'
 import { logEvent } from '../../lib/audit'
 import { checkRateLimit } from '../../lib/rate-limit'
 import { hashPassword } from '../../lib/crypto'
 import { invalidateTokenCache } from '../../lib/token-cache'
-import { getDateRange, dateRange, isTaskScheduled, calcStreaks, type Range } from '../../lib/analytics-helpers'
+import { getDateRange, dateRange, isTaskScheduledFast, parseTaskDays, calcStreaks, type Range } from '../../lib/analytics-helpers'
 import type { Env } from '../../lib/env'
 
-export const app = new Hono<{ Bindings: Env }>()
+type Variables = { userId: string; is_god: number }
 
-interface GodPayload {
-  sub: string
-  is_god: number
-}
-
-async function getGodUser(
-  c: { req: { header: (k: string) => string | undefined } },
-  env: Env
-): Promise<GodPayload | null> {
-  const cookie = c.req.header('Cookie') ?? ''
-  const m = cookie.match(/(?:^|;\s*)token=([^;]+)/)
-  if (!m) return null
-  const payload = await verifyJWT(m[1], env)
-  if (!payload || payload.is_god !== 1) return null
-  return payload
-}
+export const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 function getIP(req: Request): string {
   return req.headers.get('CF-Connecting-IP') ?? req.headers.get('X-Forwarded-For') ?? 'unknown'
@@ -56,13 +41,12 @@ const CreateInviteCodeSchema = z.object({
 // ─── GET /admin/users ─────────────────────────────────────────────────────────
 
 app.get('/users', async (c) => {
-  const god = await getGodUser(c, c.env)
-  if (!god) return err('FORBIDDEN', 'God mode required', 403)
+  if (c.get('is_god') !== 1) return err('FORBIDDEN', 'God mode required', 403)
+  const godId = c.get('userId')
 
   const db = getDB(c.env.DB)
 
-  // Rate limit: 20/min
-  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${godId}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
   const search = c.req.query('search') ?? ''
@@ -90,7 +74,7 @@ app.get('/users', async (c) => {
   }
 
   await logEvent(db, 'god_access', {
-    user_id: god.sub,
+    user_id: godId,
     ip_address: getIP(c.req.raw),
     metadata: { action: 'search_users', search },
   })
@@ -101,13 +85,13 @@ app.get('/users', async (c) => {
 // ─── GET /admin/users/:id ──────────────────────────────────────────────────────
 
 app.get('/users/:id', async (c) => {
-  const god = await getGodUser(c, c.env)
-  if (!god) return err('FORBIDDEN', 'God mode required', 403)
+  if (c.get('is_god') !== 1) return err('FORBIDDEN', 'God mode required', 403)
+  const godId = c.get('userId')
 
   const targetId = c.req.param('id')
   const db = getDB(c.env.DB)
 
-  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${godId}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
   const thirtyDaysAgo = new Date()
@@ -130,7 +114,7 @@ app.get('/users/:id', async (c) => {
   if (!user) return err('NOT_FOUND', 'User not found', 404)
 
   await logEvent(db, 'god_access', {
-    user_id: god.sub,
+    user_id: godId,
     ip_address: getIP(c.req.raw),
     metadata: { action: 'view_user', target_user_id: targetId },
   })
@@ -145,8 +129,8 @@ app.get('/users/:id', async (c) => {
 // ─── GET /admin/users/:id/analytics ───────────────────────────────────────────
 
 app.get('/users/:id/analytics', async (c) => {
-  const god = await getGodUser(c, c.env)
-  if (!god) return err('FORBIDDEN', 'God mode required', 403)
+  if (c.get('is_god') !== 1) return err('FORBIDDEN', 'God mode required', 403)
+  const godId = c.get('userId')
 
   const targetId = c.req.param('id')
   const range = (c.req.query('range') ?? 'month') as Range
@@ -154,14 +138,14 @@ app.get('/users/:id/analytics', async (c) => {
 
   const db = getDB(c.env.DB)
 
-  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${godId}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
   const targetUser = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, targetId)).get()
   if (!targetUser) return err('NOT_FOUND', 'User not found', 404)
 
   await logEvent(db, 'god_access', {
-    user_id: god.sub,
+    user_id: godId,
     ip_address: getIP(c.req.raw),
     metadata: { action: 'view_analytics', target_user_id: targetId, range },
   })
@@ -181,9 +165,10 @@ app.get('/users/:id/analytics', async (c) => {
 
   const completionSet = new Set(completions.map(c => `${c.task_id}:${c.completed_date}`))
   const dates = dateRange(start, end)
+  const parsedDaysMap = new Map(tasks.map(t => [t.id, parseTaskDays(t)]))
 
   const daily_rates = dates.map(date => {
-    const scheduled = tasks.filter(t => isTaskScheduled(t, date))
+    const scheduled = tasks.filter(t => isTaskScheduledFast(t, parsedDaysMap.get(t.id) ?? null, date))
     const done = scheduled.filter(t => completionSet.has(`${t.id}:${date}`))
     return {
       date,
@@ -202,7 +187,8 @@ app.get('/users/:id/analytics', async (c) => {
   const task_breakdown = tasks
     .filter(t => t.status !== 'archived')
     .map(t => {
-      const scheduled = dates.filter(d => isTaskScheduled(t, d))
+      const pd = parsedDaysMap.get(t.id) ?? null
+      const scheduled = dates.filter(d => isTaskScheduledFast(t, pd, d))
       const done = scheduled.filter(d => completionSet.has(`${t.id}:${d}`))
       return {
         task_id: t.id,
@@ -237,8 +223,8 @@ const ResetPasswordSchema = z.object({
 })
 
 app.patch('/users/:id/password', async (c) => {
-  const god = await getGodUser(c, c.env)
-  if (!god) return err('FORBIDDEN', 'God mode required', 403)
+  if (c.get('is_god') !== 1) return err('FORBIDDEN', 'God mode required', 403)
+  const godId = c.get('userId')
 
   const targetId = c.req.param('id')
   const body = await c.req.json().catch(() => null)
@@ -247,7 +233,7 @@ app.patch('/users/:id/password', async (c) => {
 
   const db = getDB(c.env.DB)
 
-  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${godId}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
   const target = await db.select({ id: schema.users.id, token_version: schema.users.token_version })
@@ -264,7 +250,7 @@ app.patch('/users/:id/password', async (c) => {
   invalidateTokenCache(targetId)
 
   await logEvent(db, 'god_access', {
-    user_id: god.sub,
+    user_id: godId,
     ip_address: getIP(c.req.raw),
     metadata: { action: 'reset_password', target_user_id: targetId },
   })
@@ -275,8 +261,8 @@ app.patch('/users/:id/password', async (c) => {
 // ─── POST /admin/invite-codes ──────────────────────────────────────────────────
 
 app.post('/invite-codes', async (c) => {
-  const god = await getGodUser(c, c.env)
-  if (!god) return err('FORBIDDEN', 'God mode required', 403)
+  if (c.get('is_god') !== 1) return err('FORBIDDEN', 'God mode required', 403)
+  const godId = c.get('userId')
 
   const body = await c.req.json().catch(() => null)
   const parsed = CreateInviteCodeSchema.safeParse(body)
@@ -286,7 +272,7 @@ app.post('/invite-codes', async (c) => {
 
   const db = getDB(c.env.DB)
 
-  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${godId}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
   // Check for duplicate code
@@ -304,7 +290,7 @@ app.post('/invite-codes', async (c) => {
     code: parsed.data.code,
     max_uses: parsed.data.max_uses,
     current_uses: 0,
-    created_by: god.sub,
+    created_by: godId,
   })
 
   const inviteCode = {
@@ -312,7 +298,7 @@ app.post('/invite-codes', async (c) => {
     code: parsed.data.code,
     max_uses: parsed.data.max_uses,
     current_uses: 0,
-    created_by: god.sub,
+    created_by: godId,
     created_at: new Date().toISOString(),
   }
 
@@ -322,12 +308,12 @@ app.post('/invite-codes', async (c) => {
 // ─── GET /admin/invite-codes ───────────────────────────────────────────────────
 
 app.get('/invite-codes', async (c) => {
-  const god = await getGodUser(c, c.env)
-  if (!god) return err('FORBIDDEN', 'God mode required', 403)
+  if (c.get('is_god') !== 1) return err('FORBIDDEN', 'God mode required', 403)
+  const godId = c.get('userId')
 
   const db = getDB(c.env.DB)
 
-  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
+  const allowed = await checkRateLimit(c.env.DB, `admin:${godId}`, { limit: 100, windowSeconds: 60 })
   if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
 
   const invite_codes = await db

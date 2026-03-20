@@ -127,11 +127,15 @@ app.post('/', async (c) => {
     throw e
   }
 
-  const completion = await db
-    .select()
-    .from(schema.completions)
-    .where(eq(schema.completions.id, completionId))
-    .get()
+  const completion = {
+    id: completionId,
+    task_id,
+    user_id: userId,
+    completed_date: date,
+    completed_at: new Date().toISOString(),
+    data_text: data_text ? stripHTML(data_text) : null,
+    data_number: data_number ?? null,
+  }
 
   return ok({ completion }, 201)
 })

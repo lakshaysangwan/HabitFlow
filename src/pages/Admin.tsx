@@ -8,15 +8,27 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from '@/lib/hooks/use-toast'
-import { Search, Shield, Users, Key, ChevronRight } from 'lucide-react'
+import { Search, Shield, Users, Key, ChevronRight, BarChart2, Lock } from 'lucide-react'
+import { AnalyticsOverview, type Range, type ChartType } from '@/components/AnalyticsOverview'
+import { useAdminUserAnalytics } from '@/lib/hooks/use-queries'
+import { cn } from '@/lib/utils'
 
 type AdminTab = 'users' | 'invite-codes'
 
 // ─── User Detail Panel ────────────────────────────────────────────────────────
 
+type UserDetailTab = 'profile' | 'analytics'
+
 function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) {
   const [data, setData] = useState<{ user: User; tasks: Task[] } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [detailTab, setDetailTab] = useState<UserDetailTab>('profile')
+  const [analyticsRange, setAnalyticsRange] = useState<Range>('month')
+  const [chartType, setChartType] = useState<ChartType>('bar')
+  const [newPassword, setNewPassword] = useState('')
+  const [resetting, setResetting] = useState(false)
+
+  const { data: analyticsData, isLoading: analyticsLoading } = useAdminUserAnalytics(userId, analyticsRange)
 
   useEffect(() => {
     adminApi.getUser(userId)
@@ -29,9 +41,6 @@ function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) 
   if (!data) return null
 
   const { user, tasks } = data
-  const activeTasks = tasks.filter(t => t.status === 'active')
-  const pausedTasks = tasks.filter(t => t.status === 'paused')
-  const archivedTasks = tasks.filter(t => t.status === 'archived')
 
   return (
     <div className="space-y-4">
@@ -42,54 +51,132 @@ function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) 
         ← Back to search
       </button>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle>{user.display_name}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-1 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Username</span>
-            <span className="font-mono">@{user.username}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Timezone</span>
-            <span>{user.timezone}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Joined</span>
-            <span>{user.created_at.slice(0, 10)}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">God Mode</span>
-            <Badge variant={user.is_god ? 'default' : 'secondary'}>
-              {user.is_god ? 'Yes' : 'No'}
-            </Badge>
-          </div>
-        </CardContent>
-      </Card>
+      {/* User header */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold truncate">{user.display_name}</h3>
+          <p className="text-xs text-muted-foreground font-mono">@{user.username}</p>
+        </div>
+        {user.is_god === 1 && (
+          <Badge variant="default" className="text-[10px]">
+            <Shield className="h-3 w-3 mr-1" />God
+          </Badge>
+        )}
+      </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Habits ({tasks.length} total)</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-1.5">
-          {tasks.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No habits yet.</p>
-          ) : (
-            tasks.map(t => (
-              <div key={t.id} className="flex items-center gap-2 text-sm" style={{ borderLeftWidth: 3, borderLeftColor: t.color, paddingLeft: 8 }}>
-                <span className="flex-1 truncate">{t.name}</span>
-                <Badge
-                  variant={t.status === 'active' ? 'success' : t.status === 'paused' ? 'warning' : 'secondary'}
-                  className="text-[10px]"
-                >
-                  {t.status}
-                </Badge>
-              </div>
-            ))
+      {/* Detail tabs */}
+      <div className="flex gap-1 border-b pb-2">
+        <button
+          onClick={() => setDetailTab('profile')}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+            detailTab === 'profile' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'
           )}
-        </CardContent>
-      </Card>
+        >
+          <Users className="h-3.5 w-3.5" />
+          Profile
+        </button>
+        <button
+          onClick={() => setDetailTab('analytics')}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+            detailTab === 'analytics' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <BarChart2 className="h-3.5 w-3.5" />
+          Analytics
+        </button>
+      </div>
+
+      {detailTab === 'profile' ? (
+        <>
+          <Card>
+            <CardContent className="pt-4 space-y-1 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Timezone</span>
+                <span>{user.timezone}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Joined</span>
+                <span>{user.created_at.slice(0, 10)}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Habits ({tasks.length} total)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1.5">
+              {tasks.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No habits yet.</p>
+              ) : (
+                tasks.map(t => (
+                  <div key={t.id} className="flex items-center gap-2 text-sm" style={{ borderLeftWidth: 3, borderLeftColor: t.color, paddingLeft: 8 }}>
+                    <span className="flex-1 truncate">{t.name}</span>
+                    <Badge
+                      variant={t.status === 'active' ? 'success' : t.status === 'paused' ? 'warning' : 'secondary'}
+                      className="text-[10px]"
+                    >
+                      {t.status}
+                    </Badge>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Lock className="h-3.5 w-3.5" />
+                Reset Password
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  if (newPassword.length < 8) return toast({ title: 'Password must be at least 8 characters', variant: 'destructive' })
+                  setResetting(true)
+                  try {
+                    await adminApi.resetUserPassword(userId, newPassword)
+                    setNewPassword('')
+                    toast({ title: `Password reset for @${user.username}` })
+                  } catch (err) {
+                    toast({ title: err instanceof ApiError ? err.message : 'Failed to reset password', variant: 'destructive' })
+                  } finally {
+                    setResetting(false)
+                  }
+                }}
+                className="flex gap-2"
+              >
+                <Input
+                  type="password"
+                  placeholder="New password (min 8 chars)"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  minLength={8}
+                  maxLength={128}
+                  className="flex-1"
+                />
+                <Button type="submit" variant="destructive" size="sm" disabled={resetting || newPassword.length < 8}>
+                  {resetting ? 'Saving...' : 'Reset'}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </>
+      ) : (
+        <AnalyticsOverview
+          data={analyticsData ?? null}
+          loading={analyticsLoading}
+          range={analyticsRange}
+          onRangeChange={setAnalyticsRange}
+          chartType={chartType}
+          onChartTypeChange={setChartType}
+          showHeatmap={false}
+        />
+      )}
     </div>
   )
 }

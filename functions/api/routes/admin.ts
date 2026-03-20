@@ -15,6 +15,8 @@ import { ok, err } from '../../lib/response'
 import { verifyJWT } from '../../lib/jwt'
 import { logEvent } from '../../lib/audit'
 import { checkRateLimit } from '../../lib/rate-limit'
+import { hashPassword } from '../../lib/crypto'
+import { invalidateTokenCache } from '../../lib/token-cache'
 import { getDateRange, dateRange, isTaskScheduled, calcStreaks, type Range } from '../../lib/analytics-helpers'
 import type { Env } from '../../lib/env'
 
@@ -228,6 +230,48 @@ app.get('/users/:id/analytics', async (c) => {
   })
 })
 
+// ─── PATCH /admin/users/:id/password ──────────────────────────────────────────
+
+const ResetPasswordSchema = z.object({
+  new_password: z.string().min(8).max(128),
+})
+
+app.patch('/users/:id/password', async (c) => {
+  const god = await getGodUser(c, c.env)
+  if (!god) return err('FORBIDDEN', 'God mode required', 403)
+
+  const targetId = c.req.param('id')
+  const body = await c.req.json().catch(() => null)
+  const parsed = ResetPasswordSchema.safeParse(body)
+  if (!parsed.success) return err('VALIDATION_ERROR', 'Password must be at least 8 characters')
+
+  const db = getDB(c.env.DB)
+
+  const allowed = await checkRateLimit(c.env.DB, `admin:${god.sub}`, { limit: 100, windowSeconds: 60 })
+  if (!allowed) return err('RATE_LIMITED', 'Too many requests', 429)
+
+  const target = await db.select({ id: schema.users.id, token_version: schema.users.token_version })
+    .from(schema.users).where(eq(schema.users.id, targetId)).get()
+  if (!target) return err('NOT_FOUND', 'User not found', 404)
+
+  const newHash = await hashPassword(parsed.data.new_password)
+  const newVersion = target.token_version + 1
+
+  await db.update(schema.users)
+    .set({ password_hash: newHash, token_version: newVersion, updated_at: new Date().toISOString() })
+    .where(eq(schema.users.id, targetId))
+
+  invalidateTokenCache(targetId)
+
+  await logEvent(db, 'god_access', {
+    user_id: god.sub,
+    ip_address: getIP(c.req.raw),
+    metadata: { action: 'reset_password', target_user_id: targetId },
+  })
+
+  return ok(null)
+})
+
 // ─── POST /admin/invite-codes ──────────────────────────────────────────────────
 
 app.post('/invite-codes', async (c) => {
@@ -263,11 +307,14 @@ app.post('/invite-codes', async (c) => {
     created_by: god.sub,
   })
 
-  const inviteCode = await db
-    .select()
-    .from(schema.invite_codes)
-    .where(eq(schema.invite_codes.id, codeId))
-    .get()
+  const inviteCode = {
+    id: codeId,
+    code: parsed.data.code,
+    max_uses: parsed.data.max_uses,
+    current_uses: 0,
+    created_by: god.sub,
+    created_at: new Date().toISOString(),
+  }
 
   return ok({ invite_code: inviteCode }, 201)
 })

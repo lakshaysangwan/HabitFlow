@@ -126,6 +126,9 @@ export const adminApi = {
   getUserAnalytics: (id: string, range: 'week' | 'month' | 'year' | 'all') =>
     request<OverviewAnalytics>('GET', `/api/admin/users/${id}/analytics?range=${range}`),
 
+  resetUserPassword: (id: string, new_password: string) =>
+    request<void>('PATCH', `/api/admin/users/${id}/password`, { new_password }),
+
   createInviteCode: (data: { code: string; max_uses: number }) =>
     request<{ invite_code: InviteCode }>('POST', '/api/admin/invite-codes', data),
 

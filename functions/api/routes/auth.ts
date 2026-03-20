@@ -18,6 +18,7 @@ import { signJWT, makeTokenCookie, clearTokenCookie } from '../../lib/jwt'
 import { checkRateLimit } from '../../lib/rate-limit'
 import { logEvent } from '../../lib/audit'
 import { ok, err } from '../../lib/response'
+import { invalidateTokenCache } from '../../lib/token-cache'
 import type { Env } from '../../lib/env'
 
 export const app = new Hono<{ Bindings: Env }>()
@@ -133,16 +134,26 @@ app.post('/login', async (c) => {
     'UPDATE invite_codes SET current_uses = current_uses + 1 WHERE code = ?'
   ).bind(invite_code).run()
 
-  const newUser = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get()
-  if (!newUser) return err('SERVER_ERROR', 'Failed to create account', 500)
-
   const token = await signJWT(
-    { sub: newUser.id, username: newUser.username, is_god: 0, token_version: 0 },
+    { sub: userId, username, is_god: 0, token_version: 0 },
     c.env
   )
-  await logEvent(db, 'register', { user_id: newUser.id, ip_address: ip, user_agent: ua, metadata: { invite_code } })
+  await logEvent(db, 'register', { user_id: userId, ip_address: ip, user_agent: ua, metadata: { invite_code } })
 
-  return new Response(JSON.stringify({ ok: true, data: { user: safeUser(newUser) } }), {
+  const now = new Date().toISOString()
+  const newUser = {
+    id: userId,
+    username,
+    display_name: stripHTML(username),
+    timezone: 'Asia/Kolkata',
+    is_god: 0 as const,
+    theme: 'system' as const,
+    token_version: 0,
+    created_at: now,
+    updated_at: now,
+  }
+
+  return new Response(JSON.stringify({ ok: true, data: { user: safeUser(newUser as typeof schema.users.$inferSelect) } }), {
     status: 201,
     headers: { 'Content-Type': 'application/json', 'Set-Cookie': makeTokenCookie(token, c.env) },
   })
@@ -160,6 +171,7 @@ app.post('/logout', async (c) => {
     const { verifyJWT } = await import('../../lib/jwt')
     const payload = await verifyJWT(token, c.env)
     if (payload) {
+      invalidateTokenCache(payload.sub)
       await logEvent(db, 'logout', { user_id: payload.sub, ip_address: getIP(c.req.raw) })
     }
   }
@@ -238,6 +250,7 @@ app.patch('/password', async (c) => {
     .set({ password_hash: newHash, token_version: newVersion, updated_at: new Date().toISOString() })
     .where(eq(schema.users.id, userId))
 
+  invalidateTokenCache(userId)
   await logEvent(db, 'password_change', { user_id: userId, ip_address: ip })
   await logEvent(db, 'token_revoke', { user_id: userId, metadata: { reason: 'password_change' } })
 
@@ -284,13 +297,14 @@ app.patch('/profile', async (c) => {
   if (Object.keys(updates).length === 0) return err('NO_CHANGES', 'Nothing to update')
 
   const db = getDB(c.env.DB)
+  const existing = await db.select().from(schema.users).where(eq(schema.users.id, payload.sub)).get()
+  if (!existing) return err('USER_NOT_FOUND', 'User not found', 404)
+
+  const updatedAt = new Date().toISOString()
   await db
     .update(schema.users)
-    .set({ ...updates, updated_at: new Date().toISOString() })
+    .set({ ...updates, updated_at: updatedAt })
     .where(eq(schema.users.id, payload.sub))
 
-  const user = await db.select().from(schema.users).where(eq(schema.users.id, payload.sub)).get()
-  if (!user) return err('USER_NOT_FOUND', 'User not found', 404)
-
-  return ok({ user: safeUser(user) })
+  return ok({ user: safeUser({ ...existing, ...updates, updated_at: updatedAt }) })
 })

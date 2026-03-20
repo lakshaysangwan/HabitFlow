@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { tasksApi, completionsApi } from '@/lib/api'
 import { ApiError } from '@/lib/api'
 import { toDateString, fromDateString, formatDisplayDate } from '@/lib/utils'
 import { toast } from '@/lib/hooks/use-toast'
 import type { Task, CompletionWithTask } from '@/lib/types'
+import { useTasks } from '@/lib/hooks/use-queries'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -314,10 +315,12 @@ function AddHabitDialog({
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(toDateString())
-  const [tasks, setTasks] = useState<Task[]>([])
   const [completions, setCompletions] = useState<CompletionWithTask[]>([])
-  const [loading, setLoading] = useState(true)
+  const [completionsLoading, setCompletionsLoading] = useState(true)
   const [showAddHabit, setShowAddHabit] = useState(false)
+
+  const { data: tasksData } = useTasks('all')
+  const tasks = tasksData?.tasks ?? []
 
   const today = toDateString()
   const isToday = selectedDate === today
@@ -342,25 +345,14 @@ export default function Dashboard() {
     ? Math.round((completedCount / scheduledTasks.length) * 100)
     : 0
 
-  const loadData = useCallback(async (date: string) => {
-    setLoading(true)
-    try {
-      const [tasksRes, completionsRes] = await Promise.all([
-        tasksApi.list('all'),
-        completionsApi.list(date),
-      ])
-      setTasks(tasksRes.tasks)
-      setCompletions(completionsRes.completions)
-    } catch {
-      toast({ title: 'Failed to load', description: 'Could not fetch data.', variant: 'destructive' })
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
+  // Fetch completions on date change (tasks come from cache via useTasks)
   useEffect(() => {
-    loadData(selectedDate)
-  }, [selectedDate, loadData])
+    setCompletionsLoading(true)
+    completionsApi.list(selectedDate)
+      .then(res => setCompletions(res.completions))
+      .catch(() => toast({ title: 'Failed to load completions', variant: 'destructive' }))
+      .finally(() => setCompletionsLoading(false))
+  }, [selectedDate])
 
   function goToPrev() {
     const d = fromDateString(selectedDate)
@@ -416,9 +408,8 @@ export default function Dashboard() {
     }
   }
 
-  function handleTaskCreated(task: Task) {
-    setTasks(prev => [...prev, task])
-    toast({ title: `"${task.name}" added!` })
+  function handleTaskCreated(_task: Task) {
+    toast({ title: `"${_task.name}" added!` })
   }
 
   return (
@@ -473,7 +464,7 @@ export default function Dashboard() {
 
       {/* Task list */}
       <div className="space-y-2">
-        {loading ? (
+        {completionsLoading ? (
           <div className="text-center py-12 text-muted-foreground text-sm">Loading...</div>
         ) : scheduledTasks.length === 0 ? (
           <div className="text-center py-12">

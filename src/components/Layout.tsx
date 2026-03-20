@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
-import { CheckSquare, BarChart2, Settings, Shield } from 'lucide-react'
+import { CheckSquare, BarChart2, Settings, Shield, LogOut } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
@@ -10,7 +10,7 @@ const navItems = [
 ]
 
 export default function Layout() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
   const location = useLocation()
 
   const allNav = user?.is_god
@@ -42,6 +42,15 @@ export default function Layout() {
             {label}
           </NavLink>
         ))}
+        <div className="mt-auto">
+          <button
+            onClick={() => logout()}
+            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium w-full transition-colors text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </button>
+        </div>
       </aside>
 
       {/* Main content */}
@@ -72,6 +81,13 @@ export default function Layout() {
               </NavLink>
             )
           })}
+          <button
+            onClick={() => logout()}
+            className="flex flex-col items-center gap-1 min-w-[48px] min-h-[48px] justify-center px-3 transition-colors text-muted-foreground"
+          >
+            <LogOut className="h-5 w-5" />
+            <span className="text-[10px] font-medium">Sign out</span>
+          </button>
         </div>
       </nav>
     </div>

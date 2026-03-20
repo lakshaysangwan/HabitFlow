@@ -125,6 +125,9 @@ app.post('/', async (c) => {
   const maxOrder = allUserTasks.length > 0 ? Math.max(...allUserTasks.map(t => t.sort_order)) : -1
 
   const taskId = crypto.randomUUID().replace(/-/g, '')
+  const now = new Date().toISOString()
+  const startDate = new Date().toLocaleDateString('en-CA')
+
   await db.insert(schema.tasks).values({
     id: taskId,
     user_id: userId,
@@ -136,13 +139,27 @@ app.post('/', async (c) => {
     data_label: data_label ? stripHTML(data_label) : null,
     status: 'active',
     sort_order: maxOrder + 1,
-    start_date: new Date().toLocaleDateString('en-CA'),
+    start_date: startDate,
   })
 
-  const task = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get()
-  if (!task) return err('SERVER_ERROR', 'Failed to create task', 500)
+  const task = {
+    id: taskId,
+    user_id: userId,
+    name: stripHTML(name),
+    color,
+    frequency_type,
+    frequency_days: frequency_days ?? null,
+    data_type: (data_type ?? 'none') as 'none' | 'text' | 'number' | 'both',
+    data_label: data_label ? stripHTML(data_label) : null,
+    status: 'active' as const,
+    sort_order: maxOrder + 1,
+    start_date: startDate,
+    paused_at: null,
+    created_at: now,
+    updated_at: now,
+  }
 
-  return ok({ task: { ...task, frequency_days: parseFreqDays(task) } }, 201)
+  return ok({ task }, 201)
 })
 
 // ─── PUT /tasks/reorder (must come before :id) ────────────────────────────────
@@ -168,14 +185,14 @@ app.put('/reorder', async (c) => {
     return err('FORBIDDEN', 'One or more tasks not found', 404)
   }
 
-  // Update sort_order for all tasks in parallel
-  await Promise.all(
-    parsed.data.task_ids.map((id, i) =>
-      db.update(schema.tasks)
-        .set({ sort_order: i })
-        .where(and(eq(schema.tasks.id, id), eq(schema.tasks.user_id, userId)))
-    )
-  )
+  // Single CASE UPDATE instead of N individual queries
+  const ids = parsed.data.task_ids
+  const whenClauses = ids.map(() => 'WHEN ? THEN ?').join(' ')
+  const inPlaceholders = ids.map(() => '?').join(',')
+  const caseBindings = ids.flatMap((id, i) => [id, i])
+  await c.env.DB.prepare(
+    `UPDATE tasks SET sort_order = CASE id ${whenClauses} END WHERE id IN (${inPlaceholders}) AND user_id = ?`
+  ).bind(...caseBindings, ...ids, userId).run()
 
   return ok(null)
 })

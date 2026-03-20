@@ -9,6 +9,7 @@ import type { Env } from '../lib/env'
 import { SECURITY_HEADERS } from '../lib/response'
 import { verifyJWT } from '../lib/jwt'
 import { getDB, schema } from '../lib/db'
+import { checkTokenCache, setTokenCache } from '../lib/token-cache'
 
 import { app as authRoutes } from './routes/auth'
 import { app as tasksRoutes } from './routes/tasks'
@@ -77,16 +78,24 @@ export function createApp() {
       return c.json({ ok: false, error: { code: 'TOKEN_INVALID', message: 'Invalid or expired session' } }, 401)
     }
 
-    // Token revocation check via token_version
-    const db = getDB(c.env.DB)
-    const user = await db
-      .select({ token_version: schema.users.token_version })
-      .from(schema.users)
-      .where(eq(schema.users.id, payload.sub))
-      .get()
-
-    if (!user || user.token_version !== payload.token_version) {
+    // Token revocation check via token_version (cache-first, DB fallback)
+    const cached = checkTokenCache(payload.sub, payload.token_version)
+    if (cached === false) {
       return c.json({ ok: false, error: { code: 'TOKEN_REVOKED', message: 'Session was invalidated. Please log in again.' } }, 401)
+    }
+    if (cached === null) {
+      // Cache miss — query DB and update cache
+      const db = getDB(c.env.DB)
+      const user = await db
+        .select({ token_version: schema.users.token_version })
+        .from(schema.users)
+        .where(eq(schema.users.id, payload.sub))
+        .get()
+
+      if (!user || user.token_version !== payload.token_version) {
+        return c.json({ ok: false, error: { code: 'TOKEN_REVOKED', message: 'Session was invalidated. Please log in again.' } }, 401)
+      }
+      setTokenCache(payload.sub, user.token_version)
     }
 
     c.set('userId', payload.sub)

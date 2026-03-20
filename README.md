@@ -2,7 +2,7 @@
 
 A full-stack habit tracker built on Cloudflare's edge infrastructure. No servers, no containers — everything runs at the edge.
 
-**Live:** https://habitflow-5ve.pages.dev
+**Live:** https://habitflow.uk
 
 ---
 

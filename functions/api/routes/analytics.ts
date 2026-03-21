@@ -104,9 +104,12 @@ app.get('/task/:id', async (c) => {
     return {
       date,
       scheduled,
-      completed: !!comp,
+      // Binary tasks: any completion = done. Timed tasks: only finalized = done.
+      completed: task.tracking_mode === 'binary' ? !!comp : (!!comp && comp.is_finalized === 1),
       data_text: comp?.data_text ?? null,
       data_number: comp?.data_number ?? null,
+      duration_seconds: comp?.duration_seconds ?? null,
+      is_finalized: comp?.is_finalized ?? null,
     }
   })
 

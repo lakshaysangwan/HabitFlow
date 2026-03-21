@@ -125,11 +125,20 @@ export const timersApi = {
   start: (task_id: string) =>
     request<{ timer: ActiveTimer }>('POST', '/api/timers/start', { task_id }),
 
-  stop: (task_id: string) =>
-    request<{ completion: { id: string; duration_seconds: number; completed_date: string }; needs_data_input: boolean }>('POST', '/api/timers/stop', { task_id }),
+  pause: (task_id: string) =>
+    request<{ timer: { accumulated_seconds: number; logical_date: string } }>('POST', '/api/timers/pause', { task_id }),
+
+  resume: (task_id: string) =>
+    request<{ timer: { started_at: string } }>('POST', '/api/timers/resume', { task_id }),
+
+  done: (task_id: string, data?: { data_text?: string; data_number?: number }) =>
+    request<{ completion: { id: string; duration_seconds: number; is_finalized: number } }>('POST', '/api/timers/done', { task_id, ...data }),
+
+  setTarget: (task_id: string, target_seconds: number) =>
+    request<{ target_override_seconds: number }>('PATCH', '/api/timers/target', { task_id, target_seconds }),
 
   discard: (task_id: string) =>
-    request<{ ok: true }>('POST', '/api/timers/discard', { task_id }),
+    request<void>('POST', '/api/timers/discard', { task_id }),
 }
 
 // Admin / God Mode

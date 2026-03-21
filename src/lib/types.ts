@@ -38,6 +38,7 @@ export interface Completion {
   data_text: string | null
   data_number: number | null
   duration_seconds: number | null
+  is_finalized: number // 0 | 1 — set by /timers/done, locks the row
 }
 
 export interface CompletionWithTask extends Completion {
@@ -97,6 +98,8 @@ export interface TaskAnalytics {
     completed: boolean
     data_text: string | null
     data_number: number | null
+    duration_seconds: number | null
+    is_finalized: number | null // 0 | 1 | null (null = no completion)
   }>
 }
 
@@ -128,7 +131,11 @@ export interface ActiveTimer {
   task_color: string
   tracking_mode: 'stopwatch' | 'countdown'
   timer_target_seconds: number | null
-  started_at: string
+  target_override_seconds: number | null
+  started_at: string | null  // null = paused
+  accumulated_seconds: number
+  logical_date: string        // YYYY-MM-DD in user TZ at creation
+  orphaned: boolean           // logical_date ≠ today_in_user_tz
 }
 
 export interface CalendarDay {

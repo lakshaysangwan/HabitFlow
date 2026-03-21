@@ -63,6 +63,7 @@ export const completions = sqliteTable(
     data_text: text('data_text'),
     data_number: real('data_number'),
     duration_seconds: integer('duration_seconds'),
+    is_finalized: integer('is_finalized').notNull().default(0), // 1 = locked by /timers/done
   },
   (table) => ({
     unique_task_date: uniqueIndex('uq_completions_task_date').on(table.task_id, table.completed_date),
@@ -95,7 +96,11 @@ export const active_timers = sqliteTable(
     id: text('id').primaryKey(),
     user_id: text('user_id').notNull().references(() => users.id),
     task_id: text('task_id').notNull().references(() => tasks.id),
-    started_at: text('started_at').notNull(),
+    started_at: text('started_at'),                                          // NULL = paused
+    accumulated_seconds: integer('accumulated_seconds').notNull().default(0), // time from completed pause cycles
+    target_override_seconds: integer('target_override_seconds'),             // per-day countdown target increase
+    logical_date: text('logical_date').notNull(),                            // YYYY-MM-DD in user TZ at creation
+    created_at: text('created_at').notNull().default(sql`(datetime('now'))`),
   },
   (table) => ({
     user_task_unique: uniqueIndex('uq_active_timers_user_task').on(table.user_id, table.task_id),

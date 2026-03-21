@@ -207,16 +207,48 @@ export function useStartTimer() {
   })
 }
 
-export function useStopTimer() {
+export function usePauseTimer() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (task_id: string) => timersApi.stop(task_id),
-    onSuccess: (data) => {
+    mutationFn: (task_id: string) => timersApi.pause(task_id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.activeTimers() })
+    },
+  })
+}
+
+export function useResumeTimer() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (task_id: string) => timersApi.resume(task_id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.activeTimers() })
+    },
+  })
+}
+
+export function useDoneTimer() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ task_id, data }: { task_id: string; data?: { data_text?: string; data_number?: number } }) =>
+      timersApi.done(task_id, data),
+    onSuccess: () => {
       const today = new Date().toLocaleDateString('en-CA')
       qc.invalidateQueries({ queryKey: QUERY_KEYS.activeTimers() })
       qc.invalidateQueries({ queryKey: ['tasks'] })
       qc.invalidateQueries({ queryKey: QUERY_KEYS.completions(today) })
       qc.invalidateQueries({ queryKey: QUERY_KEYS.analyticsCalendar(today.slice(0, 7)) })
+    },
+  })
+}
+
+export function useSetTimerTarget() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ task_id, target_seconds }: { task_id: string; target_seconds: number }) =>
+      timersApi.setTarget(task_id, target_seconds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.activeTimers() })
     },
   })
 }

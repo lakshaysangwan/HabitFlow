@@ -15,6 +15,24 @@ import type { Env } from '../../lib/env'
 
 export const app = new Hono<{ Bindings: Env }>()
 
+async function getUser(c: { req: { header: (k: string) => string | undefined } }, env: Env): Promise<{ id: string; timezone: string } | null> {
+  const cookie = c.req.header('Cookie') ?? ''
+  const m = cookie.match(/(?:^|;\s*)token=([^;]+)/)
+  if (!m) return null
+  const payload = await verifyJWT(m[1], env)
+  if (!payload?.sub) return null
+  const db = getDB(env.DB)
+  const user = await db.select({ id: schema.users.id, timezone: schema.users.timezone })
+    .from(schema.users).where(eq(schema.users.id, payload.sub)).get()
+  return user ?? null
+}
+
+function yesterdayInTZ(tz: string): string {
+  const d = new Date()
+  d.setDate(d.getDate() - 1)
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(d)
+}
+
 async function getUserId(c: { req: { header: (k: string) => string | undefined } }, env: Env): Promise<string | null> {
   const cookie = c.req.header('Cookie') ?? ''
   const m = cookie.match(/(?:^|;\s*)token=([^;]+)/)
@@ -74,8 +92,9 @@ app.get('/', async (c) => {
 // ─── POST /completions ────────────────────────────────────────────────────────
 
 app.post('/', async (c) => {
-  const userId = await getUserId(c, c.env)
-  if (!userId) return err('UNAUTHORIZED', 'Not authenticated', 401)
+  const user = await getUser(c, c.env)
+  if (!user) return err('UNAUTHORIZED', 'Not authenticated', 401)
+  const userId = user.id
 
   const body = await c.req.json().catch(() => null)
   const parsed = CreateCompletionSchema.safeParse(body)
@@ -85,8 +104,12 @@ app.post('/', async (c) => {
   const db = getDB(c.env.DB)
 
   // Date not in future
-  const today = new Date().toLocaleDateString('en-CA')
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: user.timezone }).format(new Date())
   if (date > today) return err('FUTURE_DATE', 'Cannot complete tasks in the future', 400)
+
+  // Past-date locking: dates before yesterday are fully locked
+  const yesterday = yesterdayInTZ(user.timezone)
+  if (date < yesterday) return err('DATE_LOCKED', 'Dates older than yesterday are locked', 403)
 
   // IDOR: verify task belongs to user and is active
   const task = await db
@@ -144,8 +167,9 @@ app.post('/', async (c) => {
 // ─── DELETE /completions/:id ───────────────────────────────────────────────────
 
 app.delete('/:id', async (c) => {
-  const userId = await getUserId(c, c.env)
-  if (!userId) return err('UNAUTHORIZED', 'Not authenticated', 401)
+  const user = await getUser(c, c.env)
+  if (!user) return err('UNAUTHORIZED', 'Not authenticated', 401)
+  const userId = user.id
 
   const completionId = c.req.param('id')
   const db = getDB(c.env.DB)
@@ -158,6 +182,13 @@ app.delete('/:id', async (c) => {
     .get()
 
   if (!existing) return err('NOT_FOUND', 'Completion not found', 404)
+
+  // Finalized completions (created by /timers/done) are locked
+  if (existing.is_finalized) return err('COMPLETION_LOCKED', 'Timer completions cannot be deleted', 403)
+
+  // Past-date locking: dates before yesterday are fully locked
+  const yesterday = yesterdayInTZ(user.timezone)
+  if (existing.completed_date < yesterday) return err('DATE_LOCKED', 'Dates older than yesterday are locked', 403)
 
   await db
     .delete(schema.completions)

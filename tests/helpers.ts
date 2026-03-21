@@ -74,11 +74,16 @@ CREATE TABLE IF NOT EXISTS rate_limits (
 ALTER TABLE tasks ADD COLUMN tracking_mode TEXT NOT NULL DEFAULT 'binary';
 ALTER TABLE tasks ADD COLUMN timer_target_seconds INTEGER;
 ALTER TABLE completions ADD COLUMN duration_seconds INTEGER;
+ALTER TABLE completions ADD COLUMN is_finalized INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS active_timers (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   task_id TEXT NOT NULL REFERENCES tasks(id),
-  started_at TEXT NOT NULL,
+  started_at TEXT,
+  accumulated_seconds INTEGER NOT NULL DEFAULT 0,
+  target_override_seconds INTEGER,
+  logical_date TEXT NOT NULL DEFAULT (date('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(user_id, task_id)
 );
 CREATE INDEX IF NOT EXISTS idx_active_timers_user ON active_timers(user_id);

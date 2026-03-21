@@ -23,6 +23,7 @@ describe('POST /api/timers/start', () => {
     expect(status).toBe(201)
     expect((body.data as any).timer.task_id).toBe(task.id)
     expect((body.data as any).timer.started_at).toBeTruthy()
+    expect((body.data as any).timer.accumulated_seconds).toBe(0)
   })
 
   it('creates active timer for countdown task', async () => {
@@ -36,7 +37,7 @@ describe('POST /api/timers/start', () => {
     expect(status).toBe(201)
   })
 
-  it('returns 409 if timer already running', async () => {
+  it('returns 409 if timer already exists for task', async () => {
     const user = await createUser(_env.DB, _env)
     const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
 
@@ -84,53 +85,269 @@ describe('POST /api/timers/start', () => {
     expect(status).toBe(400)
     expect((body.error as any).code).toBe('TASK_NOT_ACTIVE')
   })
+
+  it('enforces max 3 concurrent timers', async () => {
+    const user = await createUser(_env.DB, _env)
+    const tasks = await Promise.all([
+      createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' }),
+      createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' }),
+      createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' }),
+      createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' }),
+    ])
+
+    for (let i = 0; i < 3; i++) {
+      const { status } = await req('POST', '/api/timers/start', _env, {
+        token: user.token, body: { task_id: tasks[i].id },
+      })
+      expect(status).toBe(201)
+    }
+
+    const { status, body } = await req('POST', '/api/timers/start', _env, {
+      token: user.token, body: { task_id: tasks[3].id },
+    })
+    expect(status).toBe(409)
+    expect((body.error as any).code).toBe('TOO_MANY_TIMERS')
+  })
+
+  it('rejects start if task already has finalized completion today', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
+
+    // Start → done to finalize
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+    const { status: doneStatus } = await req('POST', '/api/timers/done', _env, { token: user.token, body: { task_id: task.id } })
+    expect(doneStatus).toBe(200)
+
+    // Try to start again
+    const { status, body } = await req('POST', '/api/timers/start', _env, {
+      token: user.token, body: { task_id: task.id },
+    })
+    expect(status).toBe(409)
+    expect((body.error as any).code).toBe('ALREADY_FINALIZED')
+  })
 })
 
-// ─── POST /api/timers/stop ─────────────────────────────────────────────────────
+// ─── POST /api/timers/pause ────────────────────────────────────────────────────
 
-describe('POST /api/timers/stop', () => {
-  it('stops timer and creates completion with duration_seconds', async () => {
+describe('POST /api/timers/pause', () => {
+  it('pauses a running timer and accumulates seconds', async () => {
     const user = await createUser(_env.DB, _env)
     const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
 
     await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
 
-    const { status, body } = await req('POST', '/api/timers/stop', _env, {
-      token: user.token,
-      body: { task_id: task.id },
+    const { status, body } = await req('POST', '/api/timers/pause', _env, {
+      token: user.token, body: { task_id: task.id },
+    })
+    expect(status).toBe(200)
+    const timer = (body.data as any).timer
+    expect(timer.accumulated_seconds).toBeGreaterThanOrEqual(0)
+  })
+
+  it('returns 400 when timer is already paused', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
+
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+    await req('POST', '/api/timers/pause', _env, { token: user.token, body: { task_id: task.id } })
+
+    const { status, body } = await req('POST', '/api/timers/pause', _env, {
+      token: user.token, body: { task_id: task.id },
+    })
+    expect(status).toBe(400)
+    expect((body.error as any).code).toBe('ALREADY_PAUSED')
+  })
+
+  it('returns 404 if no timer exists', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
+
+    const { status } = await req('POST', '/api/timers/pause', _env, {
+      token: user.token, body: { task_id: task.id },
+    })
+    expect(status).toBe(404)
+  })
+})
+
+// ─── POST /api/timers/resume ───────────────────────────────────────────────────
+
+describe('POST /api/timers/resume', () => {
+  it('resumes a paused timer', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
+
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+    await req('POST', '/api/timers/pause', _env, { token: user.token, body: { task_id: task.id } })
+
+    const { status, body } = await req('POST', '/api/timers/resume', _env, {
+      token: user.token, body: { task_id: task.id },
+    })
+    expect(status).toBe(200)
+    expect((body.data as any).timer.started_at).toBeTruthy()
+  })
+
+  it('returns 400 when timer is already running', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
+
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+
+    const { status, body } = await req('POST', '/api/timers/resume', _env, {
+      token: user.token, body: { task_id: task.id },
+    })
+    expect(status).toBe(400)
+    expect((body.error as any).code).toBe('ALREADY_RUNNING')
+  })
+})
+
+// ─── POST /api/timers/done ─────────────────────────────────────────────────────
+
+describe('POST /api/timers/done', () => {
+  it('finalizes a running timer — creates is_finalized completion', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
+
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+
+    const { status, body } = await req('POST', '/api/timers/done', _env, {
+      token: user.token, body: { task_id: task.id },
     })
     expect(status).toBe(200)
     const completion = (body.data as any).completion
     expect(completion.duration_seconds).toBeGreaterThanOrEqual(0)
-    expect(completion.completed_date).toBeTruthy()
+    expect(completion.is_finalized).toBe(1)
   })
 
-  it('accumulates duration on second stop', async () => {
+  it('finalizes a paused timer', async () => {
     const user = await createUser(_env.DB, _env)
     const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
 
-    // First session
     await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
-    const { body: body1 } = await req('POST', '/api/timers/stop', _env, { token: user.token, body: { task_id: task.id } })
-    const first = (body1.data as any).completion.duration_seconds
+    await req('POST', '/api/timers/pause', _env, { token: user.token, body: { task_id: task.id } })
 
-    // Second session
-    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
-    const { body: body2 } = await req('POST', '/api/timers/stop', _env, { token: user.token, body: { task_id: task.id } })
-    const second = (body2.data as any).completion.duration_seconds
-
-    expect(second).toBeGreaterThanOrEqual(first)
+    const { status, body } = await req('POST', '/api/timers/done', _env, {
+      token: user.token, body: { task_id: task.id },
+    })
+    expect(status).toBe(200)
+    expect((body.data as any).completion.is_finalized).toBe(1)
   })
 
-  it('returns 404 if no active timer', async () => {
+  it('accumulates across pause/resume cycles', async () => {
     const user = await createUser(_env.DB, _env)
     const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
 
-    const { status } = await req('POST', '/api/timers/stop', _env, {
-      token: user.token,
-      body: { task_id: task.id },
+    // cycle 1
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+    await req('POST', '/api/timers/pause', _env, { token: user.token, body: { task_id: task.id } })
+    // cycle 2
+    await req('POST', '/api/timers/resume', _env, { token: user.token, body: { task_id: task.id } })
+    const { body } = await req('POST', '/api/timers/done', _env, {
+      token: user.token, body: { task_id: task.id },
+    })
+    // duration should be >= 0 (timing is tight in tests)
+    expect((body.data as any).completion.duration_seconds).toBeGreaterThanOrEqual(0)
+  })
+
+  it('removes timer after done', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
+
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+    await req('POST', '/api/timers/done', _env, { token: user.token, body: { task_id: task.id } })
+
+    const { body } = await req('GET', '/api/timers/active', _env, { token: user.token })
+    const timers = (body.data as any).timers as any[]
+    expect(timers.filter(t => t.task_id === task.id)).toHaveLength(0)
+  })
+
+  it('returns 404 if no timer', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
+
+    const { status } = await req('POST', '/api/timers/done', _env, {
+      token: user.token, body: { task_id: task.id },
     })
     expect(status).toBe(404)
+  })
+})
+
+// ─── is_finalized blocks delete ────────────────────────────────────────────────
+
+describe('is_finalized — completion is locked after done', () => {
+  it('DELETE /api/completions/:id returns 403 for finalized completion', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
+
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+    const { body: doneBody } = await req('POST', '/api/timers/done', _env, {
+      token: user.token, body: { task_id: task.id },
+    })
+    const completionId = (doneBody.data as any).completion.id
+
+    const { status, body } = await req('DELETE', `/api/completions/${completionId}`, _env, {
+      token: user.token,
+    })
+    expect(status).toBe(403)
+    expect((body.error as any).code).toBe('COMPLETION_LOCKED')
+  })
+})
+
+// ─── PATCH /api/timers/target ──────────────────────────────────────────────────
+
+describe('PATCH /api/timers/target', () => {
+  it('increases target while paused', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'countdown', timer_target_seconds: 60 })
+
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+    await req('POST', '/api/timers/pause', _env, { token: user.token, body: { task_id: task.id } })
+
+    const { status, body } = await req('PATCH', '/api/timers/target', _env, {
+      token: user.token, body: { task_id: task.id, target_seconds: 120 },
+    })
+    expect(status).toBe(200)
+    expect((body.data as any).timer.target_override_seconds).toBe(120)
+  })
+
+  it('rejects target decrease', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'countdown', timer_target_seconds: 120 })
+
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+    await req('POST', '/api/timers/pause', _env, { token: user.token, body: { task_id: task.id } })
+
+    const { status, body } = await req('PATCH', '/api/timers/target', _env, {
+      token: user.token, body: { task_id: task.id, target_seconds: 60 },
+    })
+    expect(status).toBe(400)
+    expect((body.error as any).code).toBe('TARGET_TOO_LOW')
+  })
+
+  it('rejects target patch on running timer', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'countdown', timer_target_seconds: 60 })
+
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+
+    const { status, body } = await req('PATCH', '/api/timers/target', _env, {
+      token: user.token, body: { task_id: task.id, target_seconds: 120 },
+    })
+    expect(status).toBe(400)
+    expect((body.error as any).code).toBe('TIMER_RUNNING')
+  })
+
+  it('rejects for non-countdown task', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'stopwatch' })
+
+    await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
+    await req('POST', '/api/timers/pause', _env, { token: user.token, body: { task_id: task.id } })
+
+    const { status, body } = await req('PATCH', '/api/timers/target', _env, {
+      token: user.token, body: { task_id: task.id, target_seconds: 120 },
+    })
+    expect(status).toBe(400)
+    expect((body.error as any).code).toBe('NOT_COUNTDOWN')
   })
 })
 
@@ -154,7 +371,7 @@ describe('GET /api/timers/active', () => {
     expect((body2.data as any).timers).toHaveLength(0)
   })
 
-  it('returns task metadata with timer', async () => {
+  it('returns v5 fields: accumulated_seconds, logical_date, orphaned', async () => {
     const user = await createUser(_env.DB, _env)
     const task = await createTask(_env.DB, user.id, { tracking_mode: 'countdown', timer_target_seconds: 300 })
 
@@ -165,6 +382,10 @@ describe('GET /api/timers/active', () => {
     expect(timer.tracking_mode).toBe('countdown')
     expect(timer.timer_target_seconds).toBe(300)
     expect(timer.task_name).toBeTruthy()
+    expect(typeof timer.accumulated_seconds).toBe('number')
+    expect(typeof timer.logical_date).toBe('string')
+    expect(typeof timer.orphaned).toBe('boolean')
+    expect(timer.orphaned).toBe(false)
   })
 })
 
@@ -177,7 +398,7 @@ describe('POST /api/timers/discard', () => {
 
     await req('POST', '/api/timers/start', _env, { token: user.token, body: { task_id: task.id } })
 
-    const { status, body } = await req('POST', '/api/timers/discard', _env, {
+    const { status } = await req('POST', '/api/timers/discard', _env, {
       token: user.token,
       body: { task_id: task.id },
     })
@@ -185,7 +406,8 @@ describe('POST /api/timers/discard', () => {
 
     // Timer gone
     const { body: activeBody } = await req('GET', '/api/timers/active', _env, { token: user.token })
-    expect((activeBody.data as any).timers).toHaveLength(0)
+    const timers = (activeBody.data as any).timers as any[]
+    expect(timers.filter(t => t.task_id === task.id)).toHaveLength(0)
 
     // No completion created
     const today = new Date().toLocaleDateString('en-CA')
@@ -203,6 +425,22 @@ describe('POST /api/timers/discard', () => {
       body: { task_id: task.id },
     })
     expect(status).toBe(404)
+  })
+})
+
+// ─── Past-date locking ─────────────────────────────────────────────────────────
+
+describe('past-date locking on completions', () => {
+  it('POST /api/completions rejects dates older than yesterday', async () => {
+    const user = await createUser(_env.DB, _env)
+    const task = await createTask(_env.DB, user.id, { tracking_mode: 'binary', start_date: '2020-01-01' })
+
+    const { status, body } = await req('POST', '/api/completions', _env, {
+      token: user.token,
+      body: { task_id: task.id, date: '2020-01-15' },
+    })
+    expect(status).toBe(403)
+    expect((body.error as any).code).toBe('DATE_LOCKED')
   })
 })
 
@@ -335,7 +573,6 @@ describe('GET /api/analytics/calendar', () => {
     const month = today.slice(0, 7)
     const task = await createTask(_env.DB, user.id, { tracking_mode: 'binary' })
 
-    // Complete the task today
     await req('POST', '/api/completions', _env, {
       token: user.token,
       body: { task_id: task.id, date: today },

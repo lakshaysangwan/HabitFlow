@@ -6,7 +6,7 @@ import { toast } from '@/lib/hooks/use-toast'
 import type { Task, CompletionWithTask, ActiveTimer } from '@/lib/types'
 import {
   useTasks, useCalendar, useActiveTimers,
-  useStartTimer, useStopTimer, useDiscardTimer,
+  useStartTimer, usePauseTimer, useResumeTimer, useDoneTimer, useDiscardTimer,
 } from '@/lib/hooks/use-queries'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { Plus, Play, Square, X, Check, Timer, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Play, Pause, X, Check, Timer, ChevronLeft, ChevronRight, Lock, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import MiniCalendar from '@/components/MiniCalendar'
 import { tasksApi } from '@/lib/api'
@@ -48,6 +48,20 @@ function formatDuration(seconds: number): string {
   return `${s}s`
 }
 
+// MM:SS or H:MM:SS clock display. Negative values shown as +MM:SS (past zero).
+function formatTimer(totalSeconds: number): { display: string; pastZero: boolean } {
+  const pastZero = totalSeconds < 0
+  const abs = Math.abs(totalSeconds)
+  const h = Math.floor(abs / 3600)
+  const m = Math.floor((abs % 3600) / 60)
+  const s = abs % 60
+  const prefix = pastZero ? '+' : ''
+  const display = h > 0
+    ? `${prefix}${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${prefix}${m}:${String(s).padStart(2, '0')}`
+  return { display, pastZero }
+}
+
 // ─── Binary Task Card ─────────────────────────────────────────────────────────
 
 function TaskCard({
@@ -57,7 +71,7 @@ function TaskCard({
 }: {
   task: Task
   completion: CompletionWithTask | undefined
-  onToggle: (task: Task, completion: CompletionWithTask | undefined) => void
+  onToggle: (task: Task, completion: CompletionWithTask | undefined, data?: { data_text?: string; data_number?: number }) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [dataText, setDataText] = useState(completion?.data_text ?? '')
@@ -67,9 +81,24 @@ function TaskCard({
   const [saving, setSaving] = useState(false)
 
   const isCompleted = !!completion
+  const hasTrackedData = task.data_type !== 'none'
 
-  async function handleCheck() {
-    if (task.data_type !== 'none' && !isCompleted) {
+  function handleRowClick() {
+    // Completed task with data — tap to reveal recorded data
+    if (isCompleted && hasTrackedData) {
+      setExpanded(v => !v)
+      return
+    }
+    // Incomplete task with data tracking — tap to open entry form
+    if (!isCompleted && hasTrackedData) {
+      setExpanded(v => !v)
+      return
+    }
+  }
+
+  async function handleCheck(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (hasTrackedData && !isCompleted) {
       setExpanded(true)
       return
     }
@@ -80,19 +109,30 @@ function TaskCard({
     e.preventDefault()
     setSaving(true)
     try {
-      await onToggle(task, completion)
+      const data: { data_text?: string; data_number?: number } = {}
+      if (dataText.trim()) data.data_text = dataText.trim()
+      if (dataNumber !== '') data.data_number = parseFloat(dataNumber)
+      onToggle(task, undefined, Object.keys(data).length > 0 ? data : undefined)
       setExpanded(false)
     } finally {
       setSaving(false)
     }
   }
 
+  const expandable = expanded
+
   return (
     <div
-      className="rounded-lg border bg-card overflow-hidden transition-all"
+      className="rounded-lg border bg-card overflow-hidden"
       style={{ borderLeftWidth: 4, borderLeftColor: task.color }}
     >
-      <div className="flex items-center gap-3 px-4 py-3 min-h-[56px]">
+      <div
+        className={cn(
+          'flex items-center gap-3 px-4 py-3 min-h-[56px]',
+          hasTrackedData && 'cursor-pointer select-none',
+        )}
+        onClick={handleRowClick}
+      >
         <div className="flex-1 min-w-0">
           <span className={cn('text-sm font-medium transition-colors', isCompleted && 'line-through text-muted-foreground')}>
             {task.name}
@@ -102,11 +142,17 @@ function TaskCard({
               {WEEKDAYS.filter(d => task.frequency_days!.includes(d.value)).map(d => d.label).join(', ')}
             </p>
           )}
+          {isCompleted && hasTrackedData && (completion?.data_text || completion?.data_number != null) && !expanded && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {[completion.data_text, completion.data_number != null ? String(completion.data_number) : null].filter(Boolean).join(' · ')}
+              <span className="ml-1 opacity-50">· tap to view</span>
+            </p>
+          )}
         </div>
         <button
           onClick={handleCheck}
           className={cn(
-            'w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all duration-200',
+            'w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all duration-200 shrink-0',
             isCompleted ? 'border-transparent text-white scale-110' : 'border-muted-foreground/40 hover:border-primary'
           )}
           style={isCompleted ? { backgroundColor: task.color } : {}}
@@ -116,35 +162,61 @@ function TaskCard({
         </button>
       </div>
 
-      {expanded && !isCompleted && (
-        <form onSubmit={handleDataSubmit} className="border-t px-4 pb-3 pt-2 bg-muted/30 flex flex-col gap-2">
-          {(task.data_type === 'text' || task.data_type === 'both') && (
-            <Input
-              placeholder={task.data_label ?? 'Add a note...'}
-              value={dataText}
-              onChange={e => setDataText(e.target.value)}
-              maxLength={500}
-              className="font-mono text-sm"
-            />
-          )}
-          {(task.data_type === 'number' || task.data_type === 'both') && (
-            <Input
-              type="number"
-              placeholder={task.data_label ?? 'Enter value...'}
-              value={dataNumber}
-              onChange={e => setDataNumber(e.target.value)}
-              className="font-mono text-sm"
-            />
-          )}
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={saving} className="flex-1">
-              {saving ? 'Saving...' : 'Complete'}
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setExpanded(false)}>
-              Cancel
-            </Button>
+      {/* Animated expand section */}
+      {hasTrackedData && (
+        <div
+          className="grid transition-[grid-template-rows] duration-200 ease-in-out"
+          style={{ gridTemplateRows: expandable ? '1fr' : '0fr' }}
+        >
+          <div className="overflow-hidden">
+            {isCompleted ? (
+              // Show recorded data (read-only)
+              <div className="border-t px-4 pb-3 pt-2 bg-muted/20 space-y-1">
+                {completion?.data_text && (
+                  <p className="text-sm text-foreground">{completion.data_text}</p>
+                )}
+                {completion?.data_number != null && (
+                  <p className="text-sm font-mono text-foreground">
+                    {completion.data_number}{task.data_label ? ` ${task.data_label}` : ''}
+                  </p>
+                )}
+                {!completion?.data_text && completion?.data_number == null && (
+                  <p className="text-xs text-muted-foreground italic">No data recorded</p>
+                )}
+              </div>
+            ) : (
+              // Data entry form
+              <form onSubmit={handleDataSubmit} className="border-t px-4 pb-3 pt-2 bg-muted/30 flex flex-col gap-2">
+                {(task.data_type === 'text' || task.data_type === 'both') && (
+                  <Input
+                    placeholder={task.data_label ?? 'Add a note...'}
+                    value={dataText}
+                    onChange={e => setDataText(e.target.value)}
+                    maxLength={500}
+                    className="text-sm"
+                  />
+                )}
+                {(task.data_type === 'number' || task.data_type === 'both') && (
+                  <Input
+                    type="number"
+                    placeholder={task.data_label ?? 'Enter value...'}
+                    value={dataNumber}
+                    onChange={e => setDataNumber(e.target.value)}
+                    className="text-sm"
+                  />
+                )}
+                <div className="flex gap-2">
+                  <Button type="submit" size="sm" disabled={saving} className="flex-1">
+                    {saving ? 'Saving...' : 'Complete'}
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setExpanded(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            )}
           </div>
-        </form>
+        </div>
       )}
     </div>
   )
@@ -158,7 +230,9 @@ function TimerTaskCard({
   activeTimer,
   isToday,
   onStart,
-  onStop,
+  onPause,
+  onResume,
+  onDone,
   onDiscard,
 }: {
   task: Task
@@ -166,115 +240,257 @@ function TimerTaskCard({
   activeTimer: ActiveTimer | undefined
   isToday: boolean
   onStart: () => void
-  onStop: () => void
+  onPause: () => void
+  onResume: () => void
+  onDone: (data?: { data_text?: string; data_number?: number }) => void
   onDiscard: () => void
 }) {
-  const [elapsed, setElapsed] = useState(0)
+  const [liveElapsed, setLiveElapsed] = useState(0)
+  const [expanded, setExpanded] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
+  const [doneFormOpen, setDoneFormOpen] = useState(false)
+  const [doneDataText, setDoneDataText] = useState('')
+  const [doneDataNumber, setDoneDataNumber] = useState('')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const isRunning = !!activeTimer && activeTimer.started_at !== null
+  const isPaused = !!activeTimer && activeTimer.started_at === null
+
+  // Collapse when timer state changes (resumed or discarded)
   useEffect(() => {
-    if (!activeTimer) {
+    if (!isPaused) setExpanded(false)
+  }, [isPaused])
+  const isFinalized = completion?.is_finalized === 1
+  const isOrphaned = activeTimer?.orphaned ?? false
+
+  // Live tick only when running
+  useEffect(() => {
+    if (!activeTimer || !activeTimer.started_at) {
       if (intervalRef.current) clearInterval(intervalRef.current)
-      setElapsed(0)
+      setLiveElapsed(0)
       return
     }
     const startMs = new Date(activeTimer.started_at).getTime()
-    const tick = () => setElapsed(Math.floor((Date.now() - startMs) / 1000))
+    const tick = () => setLiveElapsed(Math.floor((Date.now() - startMs) / 1000))
     tick()
     intervalRef.current = setInterval(tick, 1000)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
-  }, [activeTimer])
+  }, [activeTimer?.started_at])
 
-  const isRunning = !!activeTimer
+  // Total elapsed = accumulated (from past pauses) + live (current session)
+  const accumulated = activeTimer?.accumulated_seconds ?? 0
+  const totalElapsed = isRunning ? accumulated + liveElapsed : accumulated
+
   const isCountdown = task.tracking_mode === 'countdown'
-  const target = task.timer_target_seconds ?? 0
-  const remaining = isCountdown ? Math.max(0, target - elapsed) : 0
+  const effectiveTarget = activeTimer?.target_override_seconds ?? task.timer_target_seconds ?? 0
+  // For countdown: remaining = target - totalElapsed. Negative = past zero.
+  const countdownRemaining = isCountdown ? effectiveTarget - totalElapsed : 0
+  const { display: timerDisplay, pastZero } = isCountdown
+    ? formatTimer(countdownRemaining)
+    : formatTimer(totalElapsed)
 
-  // Auto-stop when countdown reaches zero
-  useEffect(() => {
-    if (isRunning && isCountdown && remaining === 0 && elapsed > 0) {
-      onStop()
+  const progress = isCountdown && effectiveTarget > 0
+    ? Math.min(1, totalElapsed / effectiveTarget)
+    : null
+
+  const existingDuration = completion?.duration_seconds ?? 0
+
+  function handleDoneClick() {
+    if (task.data_type !== 'none') {
+      setDoneFormOpen(true)
+    } else {
+      onDone()
     }
-  }, [remaining])
-  const displayTime = isCountdown ? formatDuration(remaining) : formatDuration(elapsed)
-  const progress = isCountdown && target > 0 ? Math.min(1, elapsed / target) : null
-  const existingDuration = (completion?.duration_seconds ?? 0)
+  }
+
+  function handleDoneSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const data: { data_text?: string; data_number?: number } = {}
+    if (doneDataText.trim()) data.data_text = doneDataText.trim()
+    if (doneDataNumber !== '') data.data_number = parseFloat(doneDataNumber)
+    setDoneFormOpen(false)
+    onDone(Object.keys(data).length > 0 ? data : undefined)
+  }
+
+  // ── Finalized (locked) ───────────────────────────────────────────────────
+  if (isFinalized) {
+    return (
+      <div
+        className="rounded-lg border bg-card overflow-hidden opacity-75"
+        style={{ borderLeftWidth: 4, borderLeftColor: task.color }}
+      >
+        <div className="flex items-center gap-3 px-4 py-3 min-h-[56px]">
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-medium line-through text-muted-foreground">{task.name}</span>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {formatDuration(existingDuration)} · {isCountdown ? `Countdown ${formatDuration(effectiveTarget)}` : 'Stopwatch'}
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 text-green-600 shrink-0">
+            <Timer className="h-4 w-4" />
+            <Lock className="h-3.5 w-3.5" />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
-      className="rounded-lg border bg-card overflow-hidden transition-all"
+      className={cn(
+        'rounded-lg border bg-card overflow-hidden transition-all',
+        isRunning && 'shadow-sm',
+        isOrphaned && 'border-amber-400/50',
+      )}
       style={{ borderLeftWidth: 4, borderLeftColor: task.color }}
     >
-      <div className="flex items-center gap-3 px-4 py-3 min-h-[56px]">
+      {/* Orphaned warning */}
+      {isOrphaned && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+          <span className="text-xs text-amber-700 dark:text-amber-400 flex-1">
+            Timer from {activeTimer?.logical_date} — this day is locked
+          </span>
+          <button
+            onClick={() => setDiscardOpen(true)}
+            className="text-xs text-destructive hover:underline shrink-0"
+          >
+            Discard
+          </button>
+        </div>
+      )}
+
+      <div
+        className={cn('flex items-center gap-3 px-4 py-3 min-h-[56px]', isPaused && !isOrphaned && 'cursor-pointer select-none')}
+        onClick={isPaused && !isOrphaned ? () => setExpanded(v => !v) : undefined}
+      >
         <div className="flex-1 min-w-0">
-          <span className={cn('text-sm font-medium', isRunning && 'text-primary')}>
+          <span className={cn('text-sm font-medium', isRunning && !isOrphaned && 'text-primary')}>
             {task.name}
           </span>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {isRunning
-              ? displayTime
-              : task.tracking_mode === 'countdown' && target > 0
-                ? `Countdown · ${formatDuration(target)}`
-                : 'Stopwatch'}
-            {existingDuration > 0 && !isRunning && (
+            {activeTimer ? (
+              pastZero ? (
+                <span className="text-amber-500" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{timerDisplay}</span>
+              ) : (
+                <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{timerDisplay}</span>
+              )
+            ) : isCountdown && effectiveTarget > 0 ? (
+              `Countdown · ${formatDuration(effectiveTarget)}`
+            ) : (
+              'Stopwatch'
+            )}
+            {pastZero && <span className="ml-1 text-amber-500">· Time's up!</span>}
+            {existingDuration > 0 && !activeTimer && (
               <span className="ml-1 text-green-600">· {formatDuration(existingDuration)} logged</span>
             )}
           </p>
-          {isRunning && progress !== null && (
+          {/* Progress bar — countdown running */}
+          {isRunning && isCountdown && progress !== null && (
             <div className="mt-1.5 h-1 rounded-full bg-muted overflow-hidden">
               <div
-                className="h-full rounded-full bg-primary transition-all"
-                style={{ width: `${progress * 100}%` }}
+                className={cn('h-full rounded-full transition-all', pastZero ? 'bg-amber-500' : 'bg-primary')}
+                style={{ width: `${Math.min(1, progress) * 100}%` }}
               />
             </div>
           )}
+          {/* Pulse bar — stopwatch running */}
           {isRunning && !isCountdown && (
             <div className="mt-1.5 h-0.5 rounded-full bg-primary/30 animate-pulse" />
           )}
+          {/* Paused indicator */}
+          {isPaused && !isOrphaned && (
+            <p className="text-xs text-amber-500 mt-0.5">
+              Paused {!expanded && <span className="text-muted-foreground">· tap to expand</span>}
+            </p>
+          )}
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
-          {completion && !isRunning && (
-            <Timer className="h-4 w-4 text-green-600" />
-          )}
-          {isToday && !isRunning && (
-            <button
-              onClick={onStart}
-              className="w-8 h-8 rounded-full border-2 border-muted-foreground/40 hover:border-primary flex items-center justify-center transition-colors"
-              aria-label="Start timer"
-            >
-              <Play className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {isRunning && (
-            <>
-              <button
-                onClick={onStop}
-                className="w-8 h-8 rounded-full bg-primary/10 text-primary hover:bg-primary/20 flex items-center justify-center transition-colors"
-                aria-label="Stop timer"
-              >
-                <Square className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => setDiscardOpen(true)}
-                className="w-8 h-8 rounded-full bg-destructive/10 text-destructive hover:bg-destructive/20 flex items-center justify-center transition-colors"
-                aria-label="Discard timer"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </>
-          )}
-        </div>
+        {/* Running: single ⏸ */}
+        {isRunning && !isOrphaned && (
+          <button
+            onClick={onPause}
+            className="w-8 h-8 rounded-full bg-primary/10 text-primary hover:bg-primary/20 flex items-center justify-center transition-colors shrink-0"
+            aria-label="Pause timer"
+          >
+            <Pause className="h-3.5 w-3.5" />
+          </button>
+        )}
+
+        {/* Idle (no timer, not finalized): Play */}
+        {!activeTimer && isToday && (
+          <button
+            onClick={onStart}
+            className="w-8 h-8 rounded-full border-2 border-muted-foreground/40 hover:border-primary flex items-center justify-center transition-colors shrink-0"
+            aria-label="Start timer"
+          >
+            <Play className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {!activeTimer && !isToday && completion && (
+          <Timer className="h-4 w-4 text-green-600 shrink-0" />
+        )}
       </div>
 
+      {/* Paused controls: Resume | Done | Discard — expand on tap */}
+      {isPaused && !isOrphaned && (
+        <div
+          className="grid transition-[grid-template-rows] duration-200 ease-in-out"
+          style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
+        >
+          <div className="overflow-hidden">
+            <div className="border-t px-4 pb-3 pt-2 bg-muted/20 flex gap-2">
+              <Button size="sm" variant="outline" className="flex-1 gap-1.5" onClick={(e) => { e.stopPropagation(); onResume() }}>
+                <Play className="h-3 w-3" />
+                Resume
+              </Button>
+              <Button size="sm" className="flex-1 gap-1.5" onClick={(e) => { e.stopPropagation(); handleDoneClick() }}>
+                <Check className="h-3 w-3" />
+                Done
+              </Button>
+              <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive px-2" onClick={(e) => { e.stopPropagation(); setDiscardOpen(true) }}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Data input for Done */}
+      {doneFormOpen && (
+        <form onSubmit={handleDoneSubmit} className="border-t px-4 pb-3 pt-2 bg-muted/20 flex flex-col gap-2">
+          {(task.data_type === 'text' || task.data_type === 'both') && (
+            <Input
+              placeholder={task.data_label ?? 'Add a note...'}
+              value={doneDataText}
+              onChange={e => setDoneDataText(e.target.value)}
+              maxLength={500}
+              autoFocus
+            />
+          )}
+          {(task.data_type === 'number' || task.data_type === 'both') && (
+            <Input
+              type="number"
+              placeholder={task.data_label ?? 'Enter value...'}
+              value={doneDataNumber}
+              onChange={e => setDoneDataNumber(e.target.value)}
+            />
+          )}
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" className="flex-1">Save & Finalize</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setDoneFormOpen(false)}>Cancel</Button>
+          </div>
+        </form>
+      )}
+
+      {/* Discard confirm dialog */}
       <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
         <DialogContent className="max-w-xs">
           <DialogHeader>
             <DialogTitle>Discard timer?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {formatDuration(elapsed)} will be lost and no completion will be recorded.
+            {formatDuration(totalElapsed)} will be lost. No completion recorded.
           </p>
           <div className="flex gap-2 mt-2">
             <Button variant="destructive" className="flex-1" onClick={() => { setDiscardOpen(false); onDiscard() }}>
@@ -510,21 +726,10 @@ export default function Dashboard() {
   const isToday = selectedDate === today
 
   const startTimer = useStartTimer()
-  const stopTimer = useStopTimer()
+  const pauseTimer = usePauseTimer()
+  const resumeTimer = useResumeTimer()
+  const doneTimer = useDoneTimer()
   const discardTimer = useDiscardTimer()
-
-  // Auto-stop expired countdown timers on mount / when timers load
-  useEffect(() => {
-    if (!timersData) return
-    for (const timer of timersData.timers) {
-      if (timer.tracking_mode === 'countdown' && timer.timer_target_seconds) {
-        const elapsed = Math.floor((Date.now() - new Date(timer.started_at).getTime()) / 1000)
-        if (elapsed >= timer.timer_target_seconds) {
-          stopTimer.mutate(timer.task_id)
-        }
-      }
-    }
-  }, [timersData])
 
   function isTaskScheduled(task: Task): boolean {
     if (task.status !== 'active') return false
@@ -559,7 +764,7 @@ export default function Dashboard() {
     if (m !== calendarMonth) setCalendarMonth(m)
   }, [selectedDate])
 
-  async function handleToggle(task: Task, completion: CompletionWithTask | undefined) {
+  async function handleToggle(task: Task, completion: CompletionWithTask | undefined, data?: { data_text?: string; data_number?: number }) {
     if (completion) {
       setCompletions(prev => prev.filter(c => c.id !== completion.id))
       try {
@@ -572,12 +777,17 @@ export default function Dashboard() {
       const tempId = `temp-${Date.now()}`
       const optimistic: CompletionWithTask = {
         id: tempId, task_id: task.id, user_id: '', completed_date: selectedDate,
-        completed_at: new Date().toISOString(), data_text: null, data_number: null,
-        duration_seconds: null, task,
+        completed_at: new Date().toISOString(), data_text: data?.data_text ?? null,
+        data_number: data?.data_number ?? null, duration_seconds: null, is_finalized: 0, task,
       }
       setCompletions(prev => [...prev, optimistic])
       try {
-        const { completion: created } = await completionsApi.create({ task_id: task.id, date: selectedDate })
+        const { completion: created } = await completionsApi.create({
+          task_id: task.id,
+          date: selectedDate,
+          data_text: data?.data_text,
+          data_number: data?.data_number,
+        })
         setCompletions(prev => prev.map(c => c.id === tempId ? { ...created, task } : c))
       } catch (err) {
         setCompletions(prev => prev.filter(c => c.id !== tempId))
@@ -643,15 +853,20 @@ export default function Dashboard() {
           </p>
         )}
 
-        {calendarOpen && (
-          <MiniCalendar
-            month={calendarMonth}
-            onMonthChange={setCalendarMonth}
-            selectedDate={selectedDate}
-            onDateSelect={(d) => { setSelectedDate(d); setCalendarOpen(false) }}
-            calendarData={calendarData ?? null}
-          />
-        )}
+        <div
+          className="grid transition-[grid-template-rows] duration-200 ease-in-out"
+          style={{ gridTemplateRows: calendarOpen ? '1fr' : '0fr' }}
+        >
+          <div className="overflow-hidden">
+            <MiniCalendar
+              month={calendarMonth}
+              onMonthChange={setCalendarMonth}
+              selectedDate={selectedDate}
+              onDateSelect={(d) => { setSelectedDate(d); setCalendarOpen(false) }}
+              calendarData={calendarData ?? null}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Zone 3 — Task list */}
@@ -681,14 +896,24 @@ export default function Dashboard() {
                       onError: (err) => toast({ title: err instanceof ApiError ? err.message : 'Failed to start timer', variant: 'destructive' }),
                     })
                   }}
-                  onStop={() => {
-                    stopTimer.mutate(task.id, {
+                  onPause={() => {
+                    pauseTimer.mutate(task.id, {
+                      onError: (err) => toast({ title: err instanceof ApiError ? err.message : 'Failed to pause timer', variant: 'destructive' }),
+                    })
+                  }}
+                  onResume={() => {
+                    resumeTimer.mutate(task.id, {
+                      onError: (err) => toast({ title: err instanceof ApiError ? err.message : 'Failed to resume timer', variant: 'destructive' }),
+                    })
+                  }}
+                  onDone={(data) => {
+                    doneTimer.mutate({ task_id: task.id, data }, {
                       onSuccess: () => {
                         completionsApi.list(selectedDate)
                           .then(res => setCompletions(res.completions))
                           .catch(() => {})
                       },
-                      onError: (err) => toast({ title: err instanceof ApiError ? err.message : 'Failed to stop timer', variant: 'destructive' }),
+                      onError: (err) => toast({ title: err instanceof ApiError ? err.message : 'Failed to finalize timer', variant: 'destructive' }),
                     })
                   }}
                   onDiscard={() => {
@@ -722,6 +947,7 @@ export default function Dashboard() {
         onClose={() => setShowAddHabit(false)}
         onCreated={task => toast({ title: `"${task.name}" added!` })}
       />
+
     </div>
   )
 }

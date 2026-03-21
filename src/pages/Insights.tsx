@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  ReferenceLine, Cell,
 } from 'recharts'
 import type { Task } from '@/lib/types'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { AnalyticsOverview, type Range, type ChartType } from '@/components/AnalyticsOverview'
 import { useAnalyticsOverview, useAnalyticsTask, useTasks } from '@/lib/hooks/use-queries'
@@ -20,15 +19,12 @@ const RANGE_LABELS: Record<Range, string> = {
 
 // ─── Overview section ─────────────────────────────────────────────────────────
 
-function OverviewSection() {
-  const [range, setRange] = useState<Range>('month')
+function OverviewSection({ range }: { range: Range }) {
   const [chartType, setChartType] = useState<ChartType>('bar')
-
   const { data: overviewData, isLoading: overviewLoading } = useAnalyticsOverview(range)
 
   return (
     <>
-      {/* Summary strip */}
       {overviewData && (
         <div className="flex gap-2 text-sm text-muted-foreground flex-wrap">
           <span className="flex items-center gap-1">
@@ -41,12 +37,11 @@ function OverviewSection() {
           <span>Best: {overviewData.best_streak} days</span>
         </div>
       )}
-
       <AnalyticsOverview
         data={overviewData ?? null}
         loading={overviewLoading}
         range={range}
-        onRangeChange={setRange}
+        onRangeChange={() => {}}
         chartType={chartType}
         onChartTypeChange={setChartType}
         showHeatmap={false}
@@ -64,6 +59,7 @@ function TaskInsightRow({ task, expanded, onToggle, range }: {
   range: Range
 }) {
   const { data, isLoading } = useAnalyticsTask(task.id, range)
+  const isTimed = task.tracking_mode !== 'binary'
 
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
@@ -75,72 +71,158 @@ function TaskInsightRow({ task, expanded, onToggle, range }: {
         <span className="flex-1 text-sm font-medium">{task.name}</span>
         {data && (
           <span className="text-xs text-muted-foreground tabular-nums">
-            {data.completion_rate}% · {data.current_streak > 0 && <span>🔥{data.current_streak}</span>}
+            {isTimed ? (
+              <span>{data.total_completed} done</span>
+            ) : (
+              <span>{data.completion_rate}%{data.current_streak > 0 && <> · 🔥{data.current_streak}</>}</span>
+            )}
           </span>
         )}
         <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform shrink-0', expanded && 'rotate-90')} />
       </button>
 
-      {expanded && (
-        <div className="border-t px-4 pb-4 pt-3 space-y-3">
-          {isLoading || !data ? (
-            <div className="text-center py-4 text-muted-foreground text-sm">Loading...</div>
-          ) : (
-            <>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div>
-                  <p className="text-lg font-bold">{data.completion_rate}%</p>
-                  <p className="text-xs text-muted-foreground">Completion</p>
+      <div
+        className="grid transition-[grid-template-rows] duration-200 ease-in-out"
+        style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
+      >
+        <div className="overflow-hidden">
+          <div className="border-t px-4 pb-4 pt-3 space-y-3">
+            {isLoading || !data ? (
+              <div className="text-center py-4 text-muted-foreground text-sm">Loading...</div>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  {isTimed ? (
+                    <>
+                      <div>
+                        <p className="text-lg font-bold">{data.total_completed}</p>
+                        <p className="text-xs text-muted-foreground">Finalized</p>
+                      </div>
+                      <div>
+                        <p className="text-lg font-bold">{data.total_scheduled - data.total_completed}</p>
+                        <p className="text-xs text-muted-foreground">Missed</p>
+                      </div>
+                      <div>
+                        <p className="text-lg font-bold">{data.total_scheduled}</p>
+                        <p className="text-xs text-muted-foreground">Scheduled</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <p className="text-lg font-bold">{data.completion_rate}%</p>
+                        <p className="text-xs text-muted-foreground">Completion</p>
+                      </div>
+                      <div>
+                        <p className="text-lg font-bold">{data.current_streak}</p>
+                        <p className="text-xs text-muted-foreground">Streak</p>
+                      </div>
+                      <div>
+                        <p className="text-lg font-bold">{data.total_completed}</p>
+                        <p className="text-xs text-muted-foreground">Total done</p>
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div>
-                  <p className="text-lg font-bold">{data.current_streak}</p>
-                  <p className="text-xs text-muted-foreground">Streak</p>
-                </div>
-                <div>
-                  <p className="text-lg font-bold">{data.total_completed}</p>
-                  <p className="text-xs text-muted-foreground">Total done</p>
-                </div>
-              </div>
 
-              <ResponsiveContainer width="100%" height={140}>
-                <LineChart data={data.data_points.filter(d => d.scheduled).map(d => ({
-                  date: d.date.slice(5),
-                  done: d.completed ? 1 : 0,
-                }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="date" tick={{ fontSize: 9 }} />
-                  <YAxis domain={[0, 1]} ticks={[0, 1]} tickFormatter={v => v ? '✓' : '✗'} />
-                  <Tooltip formatter={(v: number) => v ? 'Done' : 'Missed'} />
-                  <Line type="monotone" dataKey="done" stroke={task.color} strokeWidth={2} dot={{ fill: task.color, r: 2 }} />
-                </LineChart>
-              </ResponsiveContainer>
+                {/* Chart: duration bars for timed tasks, done/missed line for binary */}
+                {isTimed ? (
+                  (() => {
+                    const targetMins = task.tracking_mode === 'countdown' && task.timer_target_seconds
+                      ? task.timer_target_seconds / 60
+                      : null
+                    const chartData = data.data_points
+                      .filter(d => d.scheduled)
+                      .map(d => ({
+                        date: d.date.slice(5),
+                        mins: d.duration_seconds != null ? Math.round(d.duration_seconds / 60) : 0,
+                        is_finalized: d.is_finalized,
+                        has_duration: d.duration_seconds != null && d.duration_seconds > 0,
+                      }))
+                    return (
+                      <ResponsiveContainer width="100%" height={160}>
+                        <BarChart data={chartData} barSize={12}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                          <XAxis dataKey="date" tick={{ fontSize: 9 }} />
+                          <YAxis tick={{ fontSize: 9 }} tickFormatter={v => `${v}m`} />
+                          <Tooltip
+                            formatter={(v: number, _: string, p: { payload?: { is_finalized: number | null; has_duration: boolean } }) => {
+                              const is_finalized = p.payload?.is_finalized ?? null
+                              const has_duration = p.payload?.has_duration ?? false
+                              const label = is_finalized === 1 ? '✓ Done' : has_duration ? '⚠ Partial' : '—'
+                              return [`${v}m  ${label}`, 'Duration']
+                            }}
+                          />
+                          {targetMins && (
+                            <ReferenceLine
+                              y={targetMins}
+                              stroke="hsl(var(--muted-foreground))"
+                              strokeDasharray="4 3"
+                              label={{ value: `${Math.round(targetMins)}m`, fontSize: 9, position: 'right' }}
+                            />
+                          )}
+                          <Bar dataKey="mins" radius={[2, 2, 0, 0]}>
+                            {chartData.map((d, i) => (
+                              <Cell
+                                key={i}
+                                fill={
+                                  d.is_finalized === 1
+                                    ? 'hsl(142 71% 45%)'       // green — done
+                                    : d.has_duration
+                                      ? 'hsl(38 92% 50%)'      // amber — partial
+                                      : 'hsl(var(--muted))'    // gray — nothing
+                                }
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )
+                  })()
+                ) : (
+                  <ResponsiveContainer width="100%" height={140}>
+                    <LineChart data={data.data_points.filter(d => d.scheduled).map(d => ({
+                      date: d.date.slice(5),
+                      done: d.completed ? 1 : 0,
+                    }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="date" tick={{ fontSize: 9 }} />
+                      <YAxis domain={[0, 1]} ticks={[0, 1]} tickFormatter={v => v ? '✓' : '✗'} />
+                      <Tooltip formatter={(v: number) => v ? 'Done' : 'Missed'} />
+                      <Line type="monotone" dataKey="done" stroke={task.color} strokeWidth={2} dot={{ fill: task.color, r: 2 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
 
-              {(task.data_type === 'number' || task.data_type === 'both') && (
-                <ResponsiveContainer width="100%" height={120}>
-                  <AreaChart data={data.data_points.filter(d => d.data_number != null).map(d => ({ date: d.date.slice(5), value: d.data_number }))}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="date" tick={{ fontSize: 9 }} />
-                    <YAxis tick={{ fontSize: 9 }} />
-                    <Tooltip />
-                    <Area type="monotone" dataKey="value" stroke={task.color} fill={task.color} fillOpacity={0.2} strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
+                {/* Numeric data chart */}
+                {(task.data_type === 'number' || task.data_type === 'both') && (
+                  <ResponsiveContainer width="100%" height={120}>
+                    <AreaChart data={data.data_points.filter(d => d.data_number != null).map(d => ({ date: d.date.slice(5), value: d.data_number }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="date" tick={{ fontSize: 9 }} />
+                      <YAxis tick={{ fontSize: 9 }} />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="value" stroke={task.color} fill={task.color} fillOpacity={0.2} strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
 
-              {(task.data_type === 'text' || task.data_type === 'both') && (
-                <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {data.data_points.filter(d => d.data_text).reverse().map(d => (
-                    <div key={d.date} className="flex gap-2 text-xs">
-                      <span className="text-muted-foreground shrink-0 tabular-nums">{d.date}</span>
-                      <span className="font-mono">{d.data_text}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
+                {/* Text data list */}
+                {(task.data_type === 'text' || task.data_type === 'both') && (
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {data.data_points.filter(d => d.data_text).reverse().map(d => (
+                      <div key={d.date} className="flex gap-2 text-xs">
+                        <span className="text-muted-foreground shrink-0 tabular-nums">{d.date}</span>
+                        <span className="font-mono">{d.data_text}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -149,12 +231,14 @@ function TaskInsightRow({ task, expanded, onToggle, range }: {
 
 export default function Insights() {
   const [range, setRange] = useState<Range>('month')
+  const [tab, setTab] = useState<'overview' | 'pertask'>('overview')
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const { data: tasksData } = useTasks('all')
   const tasks = (tasksData?.tasks ?? []).filter(t => t.status !== 'archived')
 
   return (
     <div className="space-y-5">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold">Insights</h2>
         <div className="flex gap-1">
@@ -173,22 +257,46 @@ export default function Insights() {
         </div>
       </div>
 
-      {/* Section 1 + 2 — Summary strip + overview chart */}
-      <OverviewSection />
+      {/* Tab selector */}
+      <div className="flex rounded-lg bg-muted p-1 gap-1">
+        <button
+          onClick={() => setTab('overview')}
+          className={cn(
+            'flex-1 py-1.5 rounded-md text-sm font-medium transition-colors',
+            tab === 'overview' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          Overview
+        </button>
+        <button
+          onClick={() => setTab('pertask')}
+          className={cn(
+            'flex-1 py-1.5 rounded-md text-sm font-medium transition-colors',
+            tab === 'pertask' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          Per Habit
+        </button>
+      </div>
 
-      {/* Section 3 — Per-task accordion */}
-      {tasks.length > 0 && (
+      {/* Tab content */}
+      {tab === 'overview' ? (
+        <OverviewSection range={range} />
+      ) : (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Per Habit</h3>
-          {tasks.map(task => (
-            <TaskInsightRow
-              key={task.id}
-              task={task}
-              expanded={expandedTaskId === task.id}
-              onToggle={() => setExpandedTaskId(id => id === task.id ? null : task.id)}
-              range={range}
-            />
-          ))}
+          {tasks.length === 0 ? (
+            <p className="text-center py-8 text-sm text-muted-foreground">No habits yet.</p>
+          ) : (
+            tasks.map(task => (
+              <TaskInsightRow
+                key={task.id}
+                task={task}
+                expanded={expandedTaskId === task.id}
+                onToggle={() => setExpandedTaskId(id => id === task.id ? null : task.id)}
+                range={range}
+              />
+            ))
+          )}
         </div>
       )}
     </div>

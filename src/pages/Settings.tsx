@@ -13,11 +13,12 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { toast } from '@/lib/hooks/use-toast'
-import { Eye, EyeOff, GripVertical, Pause, Play, Archive, RotateCcw, LogOut } from 'lucide-react'
+import { Eye, EyeOff, GripVertical, Pause, Play, Archive, RotateCcw, LogOut, Edit2 } from 'lucide-react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { cn } from '@/lib/utils'
+import { EditTaskDialog } from '@/components/EditTaskDialog'
 
 // ─── Theme selector ───────────────────────────────────────────────────────────
 
@@ -51,12 +52,14 @@ function SortableTaskRow({
   onResume,
   onArchive,
   onRestore,
+  onEdit,
 }: {
   task: Task
   onPause: (id: string) => void
   onResume: (id: string) => void
   onArchive: (id: string) => void
   onRestore: (id: string) => void
+  onEdit: (task: Task) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: task.id })
 
@@ -101,6 +104,13 @@ function SortableTaskRow({
         {task.status === 'active' && (
           <>
             <button
+              onClick={() => onEdit(task)}
+              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title="Edit"
+            >
+              <Edit2 className="h-3.5 w-3.5" />
+            </button>
+            <button
               onClick={() => onPause(task.id)}
               className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
               title="Pause"
@@ -119,6 +129,13 @@ function SortableTaskRow({
         {task.status === 'paused' && (
           <>
             <Badge variant="warning" className="text-[10px]">Paused</Badge>
+            <button
+              onClick={() => onEdit(task)}
+              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title="Edit"
+            >
+              <Edit2 className="h-3.5 w-3.5" />
+            </button>
             <button
               onClick={() => onResume(task.id)}
               className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -155,6 +172,7 @@ function ManageHabits() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [showArchived, setShowArchived] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
@@ -243,6 +261,7 @@ function ManageHabits() {
                 onResume={handleResume}
                 onArchive={handleArchive}
                 onRestore={handleRestore}
+                onEdit={setEditingTask}
               />
             ))
           )}
@@ -267,10 +286,20 @@ function ManageHabits() {
               onResume={handleResume}
               onArchive={handleArchive}
               onRestore={handleRestore}
+              onEdit={setEditingTask}
             />
           ))}
         </div>
       )}
+
+      <EditTaskDialog
+        task={editingTask}
+        open={editingTask !== null}
+        onClose={() => {
+          setEditingTask(null)
+          tasksApi.list('all').then(res => setTasks(res.tasks)).catch(() => {})
+        }}
+      />
     </div>
   )
 }

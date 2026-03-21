@@ -190,6 +190,13 @@ function TimerTaskCard({
   const isCountdown = task.tracking_mode === 'countdown'
   const target = task.timer_target_seconds ?? 0
   const remaining = isCountdown ? Math.max(0, target - elapsed) : 0
+
+  // Auto-stop when countdown reaches zero
+  useEffect(() => {
+    if (isRunning && isCountdown && remaining === 0 && elapsed > 0) {
+      onStop()
+    }
+  }, [remaining])
   const displayTime = isCountdown ? formatDuration(remaining) : formatDuration(elapsed)
   const progress = isCountdown && target > 0 ? Math.min(1, elapsed / target) : null
   const existingDuration = (completion?.duration_seconds ?? 0)
@@ -517,7 +524,7 @@ export default function Dashboard() {
         }
       }
     }
-  }, [timersData?.timers.map(t => t.id).join(',')])
+  }, [timersData])
 
   function isTaskScheduled(task: Task): boolean {
     if (task.status !== 'active') return false

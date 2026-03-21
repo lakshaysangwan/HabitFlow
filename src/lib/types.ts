@@ -23,6 +23,8 @@ export interface Task {
   sort_order: number
   start_date: string
   paused_at: string | null
+  tracking_mode: 'binary' | 'stopwatch' | 'countdown'
+  timer_target_seconds: number | null
   created_at: string
   updated_at: string
 }
@@ -35,6 +37,7 @@ export interface Completion {
   completed_at: string
   data_text: string | null
   data_number: number | null
+  duration_seconds: number | null
 }
 
 export interface CompletionWithTask extends Completion {
@@ -116,4 +119,26 @@ export interface OverviewAnalytics {
 export interface HeatmapData {
   year: number
   days: Array<{ date: string; count: number; total: number }>
+}
+
+export interface ActiveTimer {
+  id: string
+  task_id: string
+  task_name: string
+  task_color: string
+  tracking_mode: 'stopwatch' | 'countdown'
+  timer_target_seconds: number | null
+  started_at: string
+}
+
+export interface CalendarDay {
+  date: string
+  completed: number
+  total: number
+  ratio: number | null
+}
+
+export interface CalendarData {
+  month: string
+  days: CalendarDay[]
 }

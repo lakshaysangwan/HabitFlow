@@ -249,3 +249,51 @@ app.get('/heatmap', async (c) => {
 
   return ok({ year, days })
 })
+
+// ─── GET /calendar ─────────────────────────────────────────────────────────────
+
+app.get('/calendar', async (c) => {
+  const userId = c.get('userId')
+
+  const today = new Date().toLocaleDateString('en-CA')
+  const monthParam = c.req.query('month') ?? today.slice(0, 7)
+  if (!/^\d{4}-\d{2}$/.test(monthParam)) return err('VALIDATION_ERROR', 'month must be YYYY-MM')
+
+  const [year, month] = monthParam.split('-').map(Number)
+  const start = `${monthParam}-01`
+  const lastDay = new Date(year, month, 0).getDate()
+  const monthEnd = `${monthParam}-${String(lastDay).padStart(2, '0')}`
+  const end = monthEnd < today ? monthEnd : today
+
+  const db = getDB(c.env.DB)
+
+  const [tasks, completions] = await Promise.all([
+    db.select().from(schema.tasks).where(eq(schema.tasks.user_id, userId)).all(),
+    db.select().from(schema.completions)
+      .where(and(
+        eq(schema.completions.user_id, userId),
+        gte(schema.completions.completed_date, start),
+        lte(schema.completions.completed_date, end)
+      ))
+      .all(),
+  ])
+
+  const completionSet = new Set(completions.map(c => `${c.task_id}:${c.completed_date}`))
+  const parsedDaysMap = new Map(tasks.map(t => [t.id, parseTaskDays(t)]))
+  const dates = dateRange(start, end)
+
+  const days = dates.map(date => {
+    const scheduled = tasks.filter(t => isTaskScheduledFast(t, parsedDaysMap.get(t.id) ?? null, date))
+    const done = scheduled.filter(t => completionSet.has(`${t.id}:${date}`))
+    const total = scheduled.length
+    const completed = done.length
+    return {
+      date,
+      completed,
+      total,
+      ratio: total > 0 ? completed / total : null,
+    }
+  })
+
+  return ok({ month: monthParam, days })
+})

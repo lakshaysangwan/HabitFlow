@@ -97,6 +97,7 @@ app.post('/', async (c) => {
 
   if (!task) return err('NOT_FOUND', 'Task not found', 404)
   if (task.status === 'archived') return err('TASK_ARCHIVED', 'Cannot complete archived task', 400)
+  if (task.tracking_mode !== 'binary') return err('TIMED_TASK', 'Timed tasks must be completed via the timer', 400)
   if (date < task.start_date) return err('BEFORE_START', `This habit wasn't active on ${date}`, 400)
 
   // Validate day-of-week for weekly tasks

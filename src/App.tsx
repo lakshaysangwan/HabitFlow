@@ -4,7 +4,7 @@ import { ThemeProvider } from '@/lib/theme'
 import { Toaster } from '@/components/ui/toaster'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
-import Analytics from '@/pages/Analytics'
+import Insights from '@/pages/Insights'
 import Settings from '@/pages/Settings'
 import Admin from '@/pages/Admin'
 import Layout from '@/components/Layout'
@@ -40,7 +40,8 @@ export default function App() {
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
-              <Route path="analytics" element={<Analytics />} />
+              <Route path="analytics" element={<Navigate to="/insights" replace />} />
+              <Route path="insights" element={<Insights />} />
               <Route path="settings" element={<Settings />} />
               <Route path="settings/tasks" element={<Settings initialTab="tasks" />} />
               <Route path="admin" element={<GodRoute><Admin /></GodRoute>} />

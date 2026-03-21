@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 import { authApi, tasksApi } from '@/lib/api'
 import { ApiError } from '@/lib/api'
@@ -12,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { toast } from '@/lib/hooks/use-toast'
-import { Eye, EyeOff, GripVertical, Pause, Play, Archive, RotateCcw } from 'lucide-react'
+import { Eye, EyeOff, GripVertical, Pause, Play, Archive, RotateCcw, LogOut } from 'lucide-react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -281,7 +282,7 @@ interface SettingsProps {
 }
 
 export default function Settings({ initialTab }: SettingsProps) {
-  const { user, refreshUser } = useAuth()
+  const { user, refreshUser, logout } = useAuth()
 
   // Profile
   const [displayName, setDisplayName] = useState(user?.display_name ?? '')
@@ -483,6 +484,27 @@ export default function Settings({ initialTab }: SettingsProps) {
           <ManageHabits />
         </CardContent>
       </Card>
+
+      {/* Admin link (god mode only) */}
+      {user?.is_god === 1 && (
+        <div className="text-center">
+          <Link to="/admin" className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors">
+            Admin Panel →
+          </Link>
+        </div>
+      )}
+
+      {/* Sign out */}
+      <div className="pt-2 border-t border-border">
+        <Button
+          variant="outline"
+          className="w-full text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+          onClick={() => logout()}
+        >
+          <LogOut className="h-4 w-4 mr-2" />
+          Sign Out
+        </Button>
+      </div>
     </div>
   )
 }

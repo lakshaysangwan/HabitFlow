@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import { Flame, Target, TrendingUp, CheckSquare } from 'lucide-react'
 
 export type Range = 'week' | 'month' | 'year' | 'all'
-export type ChartType = 'bar' | 'line' | 'pie' | 'heatmap' | 'area'
+export type ChartType = 'bar' | 'line' | 'pie' | 'area'
 
 const RANGE_LABELS: Record<Range, string> = {
   week: 'Week',
@@ -27,7 +27,6 @@ const CHART_TYPES: { value: ChartType; label: string }[] = [
   { value: 'line', label: 'Line' },
   { value: 'area', label: 'Area' },
   { value: 'pie', label: 'Pie' },
-  { value: 'heatmap', label: 'Heatmap' },
 ]
 
 function HeatmapCalendar({ data }: { data: HeatmapData }) {
@@ -123,12 +122,9 @@ export function AnalyticsOverview({
     total: d.total,
   }))
 
-  const availableChartTypes = showHeatmap ? CHART_TYPES : CHART_TYPES.filter(ct => ct.value !== 'heatmap')
+  const availableChartTypes = CHART_TYPES
 
   function renderChart() {
-    if (chartType === 'heatmap' && heatmap && showHeatmap) {
-      return <HeatmapCalendar data={heatmap} />
-    }
     if (chartType === 'pie') {
       const pieData = data!.task_breakdown.map(t => ({
         name: t.task_name,

@@ -39,7 +39,15 @@ const CreateTaskSchema = z.object({
   frequency_days: z.array(z.number().int().min(1).max(7)).optional(),
   data_type: z.enum(['none', 'text', 'number', 'both']).default('none'),
   data_label: z.string().max(50).optional(),
-})
+  tracking_mode: z.enum(['binary', 'stopwatch', 'countdown']).default('binary'),
+  timer_target_seconds: z.number().int().min(10).max(86400).nullable().optional(),
+}).refine(
+  (d) => d.tracking_mode !== 'countdown' || (d.timer_target_seconds != null && d.timer_target_seconds >= 10),
+  { message: 'countdown requires timer_target_seconds (10–86400)', path: ['timer_target_seconds'] }
+).refine(
+  (d) => d.tracking_mode === 'countdown' || d.timer_target_seconds == null,
+  { message: 'timer_target_seconds only valid for countdown mode', path: ['timer_target_seconds'] }
+)
 
 const UpdateTaskSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -110,7 +118,7 @@ app.post('/', async (c) => {
   const parsed = CreateTaskSchema.safeParse(body)
   if (!parsed.success) return err('VALIDATION_ERROR', 'Invalid input')
 
-  const { name, frequency_type, frequency_days, data_type, data_label } = parsed.data
+  const { name, frequency_type, frequency_days, data_type, data_label, tracking_mode, timer_target_seconds } = parsed.data
   const db = getDB(c.env.DB)
 
   // Single query: get all user tasks for color + sort_order calculation
@@ -140,6 +148,8 @@ app.post('/', async (c) => {
     status: 'active',
     sort_order: maxOrder + 1,
     start_date: startDate,
+    tracking_mode: tracking_mode ?? 'binary',
+    timer_target_seconds: timer_target_seconds ?? null,
   })
 
   const task = {
@@ -155,6 +165,8 @@ app.post('/', async (c) => {
     sort_order: maxOrder + 1,
     start_date: startDate,
     paused_at: null,
+    tracking_mode: (tracking_mode ?? 'binary') as 'binary' | 'stopwatch' | 'countdown',
+    timer_target_seconds: timer_target_seconds ?? null,
     created_at: now,
     updated_at: now,
   }

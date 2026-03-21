@@ -16,6 +16,7 @@ import { app as tasksRoutes } from './routes/tasks'
 import { app as completionsRoutes } from './routes/completions'
 import { app as analyticsRoutes } from './routes/analytics'
 import { app as adminRoutes } from './routes/admin'
+import { app as timersRoutes } from './routes/timers'
 
 // Routes that skip JWT auth
 const PUBLIC_PATHS = ['/api/auth/login', '/api/auth/logout']
@@ -114,6 +115,7 @@ export function createApp() {
   app.route('/completions', completionsRoutes)
   app.route('/analytics', analyticsRoutes)
   app.route('/admin', adminRoutes)
+  app.route('/timers', timersRoutes)
 
   app.all('*', (c) =>
     c.json({ ok: false, error: { code: 'NOT_FOUND', message: 'API route not found' } }, 404)

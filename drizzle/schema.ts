@@ -41,6 +41,8 @@ export const tasks = sqliteTable(
     sort_order: integer('sort_order').notNull().default(0),
     start_date: text('start_date').notNull().default(sql`(date('now'))`),
     paused_at: text('paused_at'),
+    tracking_mode: text('tracking_mode').notNull().default('binary'), // binary | stopwatch | countdown
+    timer_target_seconds: integer('timer_target_seconds'),
     created_at: text('created_at').notNull().default(sql`(datetime('now'))`),
     updated_at: text('updated_at').notNull().default(sql`(datetime('now'))`),
   },
@@ -60,6 +62,7 @@ export const completions = sqliteTable(
     completed_at: text('completed_at').notNull().default(sql`(datetime('now'))`),
     data_text: text('data_text'),
     data_number: real('data_number'),
+    duration_seconds: integer('duration_seconds'),
   },
   (table) => ({
     unique_task_date: uniqueIndex('uq_completions_task_date').on(table.task_id, table.completed_date),
@@ -85,6 +88,22 @@ export const audit_log = sqliteTable(
   })
 )
 
+// ─── Active Timers ────────────────────────────────────────────────────────────
+export const active_timers = sqliteTable(
+  'active_timers',
+  {
+    id: text('id').primaryKey(),
+    user_id: text('user_id').notNull().references(() => users.id),
+    task_id: text('task_id').notNull().references(() => tasks.id),
+    started_at: text('started_at').notNull(),
+  },
+  (table) => ({
+    user_task_unique: uniqueIndex('uq_active_timers_user_task').on(table.user_id, table.task_id),
+    user_idx: index('idx_active_timers_user').on(table.user_id),
+    task_idx: index('idx_active_timers_task').on(table.task_id),
+  })
+)
+
 // ─── Rate Limits ──────────────────────────────────────────────────────────────
 export const rate_limits = sqliteTable('rate_limits', {
   key: text('key').primaryKey(), // e.g. "auth:1.2.3.4" or "password:user_id"
@@ -101,3 +120,5 @@ export type Completion = typeof completions.$inferSelect
 export type NewCompletion = typeof completions.$inferInsert
 export type InviteCode = typeof invite_codes.$inferSelect
 export type AuditLog = typeof audit_log.$inferSelect
+export type ActiveTimer = typeof active_timers.$inferSelect
+export type NewActiveTimer = typeof active_timers.$inferInsert

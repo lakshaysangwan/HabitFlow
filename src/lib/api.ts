@@ -8,6 +8,8 @@ import type {
   TaskAnalytics,
   OverviewAnalytics,
   HeatmapData,
+  ActiveTimer,
+  CalendarData,
   ApiResult,
 } from './types'
 
@@ -66,6 +68,8 @@ export const tasksApi = {
     frequency_days?: number[]
     data_type?: 'none' | 'text' | 'number' | 'both'
     data_label?: string
+    tracking_mode?: 'binary' | 'stopwatch' | 'countdown'
+    timer_target_seconds?: number | null
   }) => request<{ task: Task }>('POST', '/api/tasks', data),
 
   update: (id: string, data: Partial<Task>) =>
@@ -108,6 +112,24 @@ export const analyticsApi = {
 
   heatmap: (year: number) =>
     request<HeatmapData>('GET', `/api/analytics/heatmap?year=${year}`),
+
+  calendar: (month: string) =>
+    request<CalendarData>('GET', `/api/analytics/calendar?month=${month}`),
+}
+
+// Timers
+export const timersApi = {
+  active: () =>
+    request<{ timers: ActiveTimer[] }>('GET', '/api/timers/active'),
+
+  start: (task_id: string) =>
+    request<{ timer: ActiveTimer }>('POST', '/api/timers/start', { task_id }),
+
+  stop: (task_id: string) =>
+    request<{ completion: { id: string; duration_seconds: number; completed_date: string }; needs_data_input: boolean }>('POST', '/api/timers/stop', { task_id }),
+
+  discard: (task_id: string) =>
+    request<{ ok: true }>('POST', '/api/timers/discard', { task_id }),
 }
 
 // Admin / God Mode

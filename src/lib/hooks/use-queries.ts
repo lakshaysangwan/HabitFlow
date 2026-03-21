@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { tasksApi, completionsApi, analyticsApi, adminApi } from '@/lib/api'
+import { tasksApi, completionsApi, analyticsApi, adminApi, timersApi } from '@/lib/api'
 
 // ─── Query Keys ───────────────────────────────────────────────────────────────
 
@@ -9,6 +9,8 @@ export const QUERY_KEYS = {
   analyticsOverview: (range: string) => ['analytics', 'overview', range] as const,
   analyticsHeatmap: (year: number) => ['analytics', 'heatmap', year] as const,
   analyticsTask: (taskId: string, range: string) => ['analytics', 'task', taskId, range] as const,
+  analyticsCalendar: (month: string) => ['analytics', 'calendar', month] as const,
+  activeTimers: () => ['timers', 'active'] as const,
   adminUser: (userId: string) => ['admin', 'user', userId] as const,
   adminUserAnalytics: (userId: string, range: string) => ['admin', 'user', userId, 'analytics', range] as const,
   adminInviteCodes: () => ['admin', 'invite-codes'] as const,
@@ -81,6 +83,24 @@ export function useAdminInviteCodes() {
     queryKey: QUERY_KEYS.adminInviteCodes(),
     queryFn: () => adminApi.listInviteCodes(),
     staleTime: 60_000,
+  })
+}
+
+export function useActiveTimers() {
+  return useQuery({
+    queryKey: QUERY_KEYS.activeTimers(),
+    queryFn: () => timersApi.active(),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  })
+}
+
+export function useCalendar(month: string) {
+  return useQuery({
+    queryKey: QUERY_KEYS.analyticsCalendar(month),
+    queryFn: () => analyticsApi.calendar(month),
+    staleTime: 5 * 60_000,
+    enabled: !!month,
   })
 }
 
@@ -173,6 +193,40 @@ export function useCreateInviteCode() {
     mutationFn: adminApi.createInviteCode,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QUERY_KEYS.adminInviteCodes() })
+    },
+  })
+}
+
+export function useStartTimer() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (task_id: string) => timersApi.start(task_id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.activeTimers() })
+    },
+  })
+}
+
+export function useStopTimer() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (task_id: string) => timersApi.stop(task_id),
+    onSuccess: (data) => {
+      const today = new Date().toLocaleDateString('en-CA')
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.activeTimers() })
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.completions(today) })
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.analyticsCalendar(today.slice(0, 7)) })
+    },
+  })
+}
+
+export function useDiscardTimer() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (task_id: string) => timersApi.discard(task_id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QUERY_KEYS.activeTimers() })
     },
   })
 }

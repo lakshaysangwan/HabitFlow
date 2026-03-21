@@ -71,6 +71,18 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   count INTEGER NOT NULL DEFAULT 1,
   window_start INTEGER NOT NULL
 );
+ALTER TABLE tasks ADD COLUMN tracking_mode TEXT NOT NULL DEFAULT 'binary';
+ALTER TABLE tasks ADD COLUMN timer_target_seconds INTEGER;
+ALTER TABLE completions ADD COLUMN duration_seconds INTEGER;
+CREATE TABLE IF NOT EXISTS active_timers (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  task_id TEXT NOT NULL REFERENCES tasks(id),
+  started_at TEXT NOT NULL,
+  UNIQUE(user_id, task_id)
+);
+CREATE INDEX IF NOT EXISTS idx_active_timers_user ON active_timers(user_id);
+CREATE INDEX IF NOT EXISTS idx_active_timers_task ON active_timers(task_id);
 `
 
 export async function applyMigrations(db: D1Database): Promise<void> {
@@ -132,6 +144,8 @@ export async function createTask(
     frequency_days?: number[]
     start_date?: string
     sort_order?: number
+    tracking_mode?: 'binary' | 'stopwatch' | 'countdown'
+    timer_target_seconds?: number | null
   } = {}
 ): Promise<{ id: string; name: string }> {
   const id = `t${uid()}`
@@ -140,8 +154,8 @@ export async function createTask(
 
   await db
     .prepare(
-      `INSERT INTO tasks (id, user_id, name, color, frequency_type, frequency_days, status, sort_order, start_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (id, user_id, name, color, frequency_type, frequency_days, status, sort_order, start_date, tracking_mode, timer_target_seconds)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -152,7 +166,9 @@ export async function createTask(
       opts.frequency_days ? JSON.stringify(opts.frequency_days) : null,
       opts.status ?? 'active',
       opts.sort_order ?? 0,
-      opts.start_date ?? today
+      opts.start_date ?? today,
+      opts.tracking_mode ?? 'binary',
+      opts.timer_target_seconds ?? null
     )
     .run()
 
@@ -163,14 +179,15 @@ export async function createCompletion(
   db: D1Database,
   taskId: string,
   userId: string,
-  date: string
+  date: string,
+  opts: { data_text?: string; data_number?: number } = {}
 ): Promise<{ id: string }> {
   const id = `c${uid()}`
   await db
     .prepare(
-      `INSERT INTO completions (id, task_id, user_id, completed_date) VALUES (?, ?, ?, ?)`
+      `INSERT INTO completions (id, task_id, user_id, completed_date, data_text, data_number) VALUES (?, ?, ?, ?, ?, ?)`
     )
-    .bind(id, taskId, userId, date)
+    .bind(id, taskId, userId, date, opts.data_text ?? null, opts.data_number ?? null)
     .run()
   return { id }
 }
@@ -200,7 +217,7 @@ export async function req(
   path: string,
   env: Env,
   opts: { body?: unknown; token?: string } = {}
-): Promise<{ status: number; body: Record<string, unknown> }> {
+): Promise<{ status: number; body: Record<string, unknown>; cookie: string | null }> {
   const url = `http://localhost${path}`
   const headers: Record<string, string> = {}
 
@@ -222,5 +239,14 @@ export async function req(
 
   const res = await _app.fetch(request, env)
   const body = await res.json() as Record<string, unknown>
-  return { status: res.status, body }
+
+  // Extract token value from Set-Cookie header (e.g. "token=eyJ...; HttpOnly; ...")
+  const setCookie = res.headers.get('Set-Cookie')
+  let cookie: string | null = null
+  if (setCookie) {
+    const match = setCookie.match(/^token=([^;]+)/)
+    if (match) cookie = match[1]
+  }
+
+  return { status: res.status, body, cookie }
 }

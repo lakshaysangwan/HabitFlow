@@ -1,60 +1,74 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom'
-import { CheckSquare, BarChart2, Settings, Shield, LogOut } from 'lucide-react'
+import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { CheckSquare, BarChart2, Settings } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
-const navItems = [
+const mainTabs = [
   { to: '/dashboard', label: 'Today', Icon: CheckSquare },
-  { to: '/analytics', label: 'Analytics', Icon: BarChart2 },
-  { to: '/settings', label: 'Settings', Icon: Settings },
+  { to: '/insights', label: 'Insights', Icon: BarChart2 },
 ]
 
 export default function Layout() {
-  const { user, logout } = useAuth()
-  const location = useLocation()
-
-  const allNav = user?.is_god
-    ? [...navItems, { to: '/admin', label: 'God Mode', Icon: Shield }]
-    : navItems
+  const { user } = useAuth()
+  const navigate = useNavigate()
 
   return (
     <div className="flex h-screen bg-background">
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:flex lg:flex-col lg:w-56 lg:border-r lg:border-border lg:bg-card px-3 py-6 gap-1">
-        <div className="px-3 mb-6">
-          <h1 className="text-xl font-bold text-primary">HabitFlow</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">{user?.display_name}</p>
+      {/* Desktop sidebar — icon rail that expands on hover */}
+      <aside className="hidden lg:flex lg:flex-col group w-12 hover:w-40 overflow-hidden transition-all duration-200 border-r border-border bg-card px-2 py-6 gap-1 shrink-0">
+        <div className="mb-6 px-1 flex items-center gap-2 overflow-hidden">
+          <CheckSquare className="h-5 w-5 text-primary shrink-0" />
+          <span className="text-primary font-bold text-base whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150">HabitFlow</span>
         </div>
-        {allNav.map(({ to, label, Icon }) => (
+        {mainTabs.map(({ to, label, Icon }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) =>
               cn(
-                'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                'flex items-center gap-3 p-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap',
                 isActive
                   ? 'bg-primary/10 text-primary'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
               )
             }
           >
-            <Icon className="h-4 w-4" />
-            {label}
+            <Icon className="h-5 w-5 shrink-0" />
+            <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-150">{label}</span>
           </NavLink>
         ))}
         <div className="mt-auto">
-          <button
-            onClick={() => logout()}
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium w-full transition-colors text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-3 p-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap',
+                isActive
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+              )
+            }
           >
-            <LogOut className="h-4 w-4" />
-            Sign out
-          </button>
+            <Settings className="h-5 w-5 shrink-0" />
+            <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-150">Settings</span>
+          </NavLink>
         </div>
       </aside>
 
       {/* Main content */}
       <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Mobile top header */}
+        <header className="lg:hidden flex items-center justify-between px-4 h-12 border-b border-border bg-card shrink-0">
+          <span className="text-primary font-bold text-base">HabitFlow</span>
+          <button
+            onClick={() => navigate('/settings')}
+            className="p-2 rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            aria-label="Settings"
+          >
+            <Settings className="h-5 w-5" />
+          </button>
+        </header>
+
         <div className="flex-1 overflow-y-auto pb-20 lg:pb-6">
           <div className="max-w-2xl mx-auto px-4 py-4 lg:px-6 lg:py-6">
             <Outlet />
@@ -62,32 +76,24 @@ export default function Layout() {
         </div>
       </main>
 
-      {/* Mobile bottom tab bar */}
+      {/* Mobile bottom tab bar — 2 tabs only */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 border-t border-border bg-card safe-bottom z-50">
         <div className="flex items-center justify-around h-16">
-          {allNav.map(({ to, label, Icon }) => {
-            const isActive = location.pathname.startsWith(to)
-            return (
-              <NavLink
-                key={to}
-                to={to}
-                className={cn(
-                  'flex flex-col items-center gap-1 min-w-[48px] min-h-[48px] justify-center px-3 transition-colors',
+          {mainTabs.map(({ to, label, Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                cn(
+                  'flex flex-col items-center gap-1 flex-1 h-16 justify-center transition-colors',
                   isActive ? 'text-primary' : 'text-muted-foreground'
-                )}
-              >
-                <Icon className="h-5 w-5" />
-                <span className="text-[10px] font-medium">{label}</span>
-              </NavLink>
-            )
-          })}
-          <button
-            onClick={() => logout()}
-            className="flex flex-col items-center gap-1 min-w-[48px] min-h-[48px] justify-center px-3 transition-colors text-muted-foreground"
-          >
-            <LogOut className="h-5 w-5" />
-            <span className="text-[10px] font-medium">Sign out</span>
-          </button>
+                )
+              }
+            >
+              <Icon className="h-5 w-5" />
+              <span className="text-[10px] font-medium">{label}</span>
+            </NavLink>
+          ))}
         </div>
       </nav>
     </div>

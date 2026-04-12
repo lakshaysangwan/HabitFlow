@@ -345,20 +345,33 @@ function TimerTaskCard({
       style={{ borderLeftWidth: 4, borderLeftColor: task.color }}
     >
       {/* Orphaned warning */}
-      {isOrphaned && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-          <span className="text-xs text-amber-700 dark:text-amber-400 flex-1">
-            Timer from {activeTimer?.logical_date} — this day is locked
-          </span>
-          <button
-            onClick={() => setDiscardOpen(true)}
-            className="text-xs text-destructive hover:underline shrink-0"
-          >
-            Discard
-          </button>
-        </div>
-      )}
+      {isOrphaned && (() => {
+        const yesterday = toDateString(new Date(Date.now() - 86400000))
+        const isSaveable = activeTimer && activeTimer.logical_date >= yesterday
+        return (
+          <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+            <span className="text-xs text-amber-700 dark:text-amber-400 flex-1">
+              Timer from {fullDateLabel(activeTimer!.logical_date)}
+              {isSaveable ? ' — save or discard' : ' — too old, discard'}
+            </span>
+            {isSaveable && (
+              <button
+                onClick={() => handleDoneClick()}
+                className="text-xs text-primary font-medium hover:underline shrink-0"
+              >
+                Save
+              </button>
+            )}
+            <button
+              onClick={() => setDiscardOpen(true)}
+              className="text-xs text-destructive hover:underline shrink-0"
+            >
+              Discard
+            </button>
+          </div>
+        )
+      })()}
 
       <div
         className={cn('flex items-center gap-3 px-4 py-3 min-h-[56px]', isPaused && !isOrphaned && 'cursor-pointer select-none')}

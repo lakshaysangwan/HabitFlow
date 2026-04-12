@@ -13,6 +13,14 @@ export const TASK_COLORS = [
   '#22C55E', // Green
   '#14B8A6', // Teal
   '#06B6D4', // Cyan
+  '#84CC16', // Lime
+  '#0EA5E9', // Sky
+  '#10B981', // Emerald
+  '#D946EF', // Fuchsia
+  '#78716C', // Stone
+  '#0891B2', // Cyan-dark
+  '#7C3AED', // Violet-dark
+  '#DC2626', // Red-dark
 ]
 
 /**

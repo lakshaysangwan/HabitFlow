@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { ApiError, tasksApi } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
+import { ColorPicker } from '@/components/ColorPicker'
 import type { Task } from '@/lib/types'
 
 const WEEKDAYS = [
@@ -29,6 +30,7 @@ export function EditTaskDialog({
 }) {
   const qc = useQueryClient()
   const [name, setName] = useState('')
+  const [color, setColor] = useState('')
   const [freqType, setFreqType] = useState<'daily' | 'weekly'>('daily')
   const [freqDays, setFreqDays] = useState<number[]>([])
   const [loading, setLoading] = useState(false)
@@ -37,6 +39,7 @@ export function EditTaskDialog({
   useEffect(() => {
     if (task) {
       setName(task.name)
+      setColor(task.color)
       setFreqType(task.frequency_type)
       setFreqDays(task.frequency_days ?? [])
       setError(null)
@@ -54,6 +57,7 @@ export function EditTaskDialog({
     try {
       await tasksApi.update(task.id, {
         name: name.trim(),
+        color,
         frequency_type: freqType,
         frequency_days: freqType === 'weekly' ? freqDays : undefined,
       })
@@ -85,6 +89,14 @@ export function EditTaskDialog({
               maxLength={100}
               autoFocus
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Color</Label>
+            <div className="flex items-center gap-3">
+              <ColorPicker value={color} onChange={setColor} />
+              <span className="text-xs text-muted-foreground font-mono">{color}</span>
+            </div>
           </div>
 
           <div className="space-y-2">

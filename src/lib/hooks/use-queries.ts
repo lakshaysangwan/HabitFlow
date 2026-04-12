@@ -173,6 +173,7 @@ export function useCreateCompletion() {
     mutationFn: completionsApi.create,
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: QUERY_KEYS.completions(vars.date) })
+      qc.invalidateQueries({ queryKey: ['analytics'] })
     },
   })
 }
@@ -183,6 +184,7 @@ export function useDeleteCompletion() {
     mutationFn: completionsApi.delete,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['completions'] })
+      qc.invalidateQueries({ queryKey: ['analytics'] })
     },
   })
 }
@@ -237,7 +239,7 @@ export function useDoneTimer() {
       qc.invalidateQueries({ queryKey: QUERY_KEYS.activeTimers() })
       qc.invalidateQueries({ queryKey: ['tasks'] })
       qc.invalidateQueries({ queryKey: QUERY_KEYS.completions(today) })
-      qc.invalidateQueries({ queryKey: QUERY_KEYS.analyticsCalendar(today.slice(0, 7)) })
+      qc.invalidateQueries({ queryKey: ['analytics'] })
     },
   })
 }

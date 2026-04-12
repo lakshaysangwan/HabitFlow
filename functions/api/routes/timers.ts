@@ -284,12 +284,19 @@ app.post('/done', async (c) => {
 
   if (!timer) return err('NOT_FOUND', 'No timer found for this task', 404)
 
-  // Orphan check
+  // Orphan check — allow saving timers from yesterday, reject older
   const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get()
   const tz = user?.timezone ?? 'UTC'
   const today = todayInTZ(tz)
+  const yesterday = yesterdayInTZ(tz)
 
-  if (timer.logical_date !== today) return err('ORPHANED_TIMER', 'Timer is from a previous day — discard it', 409)
+  let completionDate = today
+  if (timer.logical_date !== today) {
+    if (timer.logical_date < yesterday) {
+      return err('ORPHANED_TIMER', 'Timer is too old — discard it', 409)
+    }
+    completionDate = timer.logical_date
+  }
 
   // If running, auto-pause first to accumulate current session
   let totalSeconds = timer.accumulated_seconds
@@ -307,7 +314,7 @@ app.post('/done', async (c) => {
     .where(and(
       eq(schema.completions.task_id, task_id),
       eq(schema.completions.user_id, userId),
-      eq(schema.completions.completed_date, today),
+      eq(schema.completions.completed_date, completionDate),
     ))
     .get()
 
@@ -332,7 +339,7 @@ app.post('/done', async (c) => {
       id: completionId,
       task_id,
       user_id: userId,
-      completed_date: today,
+      completed_date: completionDate,
       duration_seconds: finalDuration,
       is_finalized: 1,
       data_text: data_text ?? null,
@@ -352,7 +359,7 @@ app.post('/done', async (c) => {
     completion: {
       id: returnId,
       duration_seconds: finalDuration,
-      completed_date: today,
+      completed_date: completionDate,
       is_finalized: 1,
     },
     needs_data_input: (task?.data_type ?? 'none') !== 'none',

@@ -149,7 +149,9 @@ function TaskInsightRow({ task, expanded, onToggle, range }: {
                             formatter={(v: number, _: string, p: { payload?: { is_finalized: number | null; has_duration: boolean } }) => {
                               const is_finalized = p.payload?.is_finalized ?? null
                               const has_duration = p.payload?.has_duration ?? false
-                              const label = is_finalized === 1 ? '✓ Done' : has_duration ? '⚠ Partial' : '—'
+                              const label = is_finalized === 1
+                                ? (has_duration ? '✓ Done' : '✓ Done (no time)')
+                                : has_duration ? '⚠ Partial' : '—'
                               return [`${v}m  ${label}`, 'Duration']
                             }}
                           />
@@ -161,7 +163,7 @@ function TaskInsightRow({ task, expanded, onToggle, range }: {
                               label={{ value: `${Math.round(targetMins)}m`, fontSize: 9, position: 'right' }}
                             />
                           )}
-                          <Bar dataKey="mins" radius={[2, 2, 0, 0]}>
+                          <Bar dataKey="mins" radius={[2, 2, 0, 0]} minPointSize={4}>
                             {chartData.map((d, i) => (
                               <Cell
                                 key={i}

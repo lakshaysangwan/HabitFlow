@@ -51,6 +51,7 @@ const CreateTaskSchema = z.object({
 
 const UpdateTaskSchema = z.object({
   name: z.string().min(1).max(100).optional(),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   frequency_type: z.enum(['daily', 'weekly']).optional(),
   frequency_days: z.array(z.number().int().min(1).max(7)).optional().nullable(),
   data_type: z.enum(['none', 'text', 'number', 'both']).optional(),
@@ -234,6 +235,7 @@ app.patch('/:id', async (c) => {
   const updatedAt = new Date().toISOString()
   const updates: Partial<typeof schema.tasks.$inferInsert> = { updated_at: updatedAt }
   if (parsed.data.name !== undefined) updates.name = stripHTML(parsed.data.name)
+  if (parsed.data.color !== undefined) updates.color = parsed.data.color
   if (parsed.data.frequency_type !== undefined) updates.frequency_type = parsed.data.frequency_type
   if (parsed.data.frequency_days !== undefined) {
     updates.frequency_days = parsed.data.frequency_days ? JSON.stringify(parsed.data.frequency_days) : null
